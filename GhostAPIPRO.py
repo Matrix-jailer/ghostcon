@@ -575,3 +575,9 @@ async def gateway_hunter(url: HttpUrl):
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+# ✅ Add this to handle root ("/") and avoid 404
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "GhostCon API is running"}
+
