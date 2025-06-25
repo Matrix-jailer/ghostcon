@@ -102,7 +102,7 @@ THREE_D_SECURE_KEYWORDS = [re.compile(pattern, re.IGNORECASE) for pattern in [
 # Gateway keywords (regex)
 GATEWAY_KEYWORDS = {
     "stripe": [re.compile(pattern, re.IGNORECASE) for pattern in [
-        r'stripe\.com', r'api\.stripe\.com/v1', r'js\.stripe\.com', r.js(api\.js$|js$|min\.js$), r'client_secret',
+        r'stripe\.com', r'api\.stripe\.com/v1', r'js\.stripe\.com', r'js/(api\.js$|js$|min\.js$)', r'client_secret',
         r'pi_', r'payment_intent', r'data-stripe', r'stripe-payment-element',
         r'stripe-elements', r'stripe-checkout', r'hooks\.stripe\.com', r'm\.stripe\.network',
         r'stripe__input', r'stripe-card-element', r'stripe-v3ds', r'confirmCardPayment',
