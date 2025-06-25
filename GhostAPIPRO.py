@@ -13,17 +13,17 @@ import re
 import logging
 import hashlib
 from collections import deque
-from multiprocessing import Pool  # CHANGED: Removed Manager
+from multiprocessing import Pool
 
 # Configure logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Payment gateways
 PAYMENT_GATEWAYS = [
     "stripe", "paypal", "paytm", "razorpay", "square", "adyen", "braintree",
     "authorize.net", "klarna", "checkout.com", "Shopify Payments", "worldpay",
-    "2checkout", "Amazon pay", "Apple pay", "Google pay", "mollie", "opayo", "paddle"
+    "2checkout", "amazon_pay", "apple_pay", "google_pay", "mollie", "opayo", "paddle"
 ]
 
 # Captcha patterns
@@ -102,11 +102,11 @@ THREE_D_SECURE_KEYWORDS = [re.compile(pattern, re.IGNORECASE) for pattern in [
 # Gateway keywords (regex)
 GATEWAY_KEYWORDS = {
     "stripe": [re.compile(pattern, re.IGNORECASE) for pattern in [
-        r'stripe\.com', r'api\.stripe\.com/v1', r'js\.stripe\.com', r'js/(api\.js$|js$|min\.js$)', r'client_secret',
-        r'pi_', r'payment_intent', r'data-stripe', r'stripe-payment-element',
+        r'stripe\.com', r'api\.stripe\.com/v1', r'js\.stripe\.com', r'stripe\.js', r'stripe\.min\.js',
+        r'client_secret', r'pi_', r'payment_intent', r'data-stripe', r'stripe-payment-element',
         r'stripe-elements', r'stripe-checkout', r'hooks\.stripe\.com', r'm\.stripe\.network',
         r'stripe__input', r'stripe-card-element', r'stripe-v3ds', r'confirmCardPayment',
-        r'createPaymentMethod', r'stripePublicKey', r'stripe\.handleCardAction',
+        r'createPaymentMethod', r'stripePublicKey', r'Stripe\(', r'stripe\.handleCardAction',
         r'elements\.create', r'js\.stripe\.com/v3/hcaptcha-invisible', r'js\.stripe\.com/v3',
         r'stripe\.createToken', r'stripe-payment-request', r'stripe__frame',
         r'api\.stripe\.com/v1/payment_methods', r'js\.stripe\.com', r'api\.stripe\.com/v1/tokens',
@@ -120,7 +120,7 @@ GATEWAY_KEYWORDS = {
         r'PayPal\.Buttons', r'paypal\.Buttons', r'data-paypal-client-id', r'paypal\.com/sdk/js',
         r'paypal\.Order\.create', r'paypal-checkout-component', r'api-m\.paypal\.com', r'paypal-funding',
         r'paypal-hosted-fields', r'paypal-transaction-id', r'paypal\.me', r'paypal\.com/v2/checkout',
-        r'paypal-checkout', r'paypal\.com/api', r'sdk\.paypal\.com', r'gotopaypalexpresscheckout'
+        r'paypal-checkout', r'paypal\.com/api', r'paypal', r'sdk\.paypal\.com', r'gotopaypalexpresscheckout'
     ]],
     "braintree": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'api\.braintreegateway\.com/v1', r'braintreepayments\.com', r'js\.braintreegateway\.com',
@@ -189,19 +189,19 @@ GATEWAY_KEYWORDS = {
         r'2checkout-hosted', r'api\.2checkout\.com', r'2co\.min\.js', r'2checkout\.token', r'2co-checkout',
         r'data-2co-seller-id', r'2checkout\.convertplus', r'secure\.2co\.com/v2'
     ]],
-    "Amazon pay": [re.compile(pattern, re.IGNORECASE) for pattern in [
+    "amazon_pay": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'payments\.amazon\.com', r'amazonpay\.js', r'data-amazon-pay', r'amazon-pay-button',
         r'amazon-pay-checkout-sdk', r'amazon-pay-wallet', r'amazon-checkout\.js', r'payments\.amazon\.com/v2',
         r'amazon-pay-token', r'amazon-pay-sdk', r'data-amazon-pay-merchant-id', r'amazon-pay-signin',
         r'amazon-pay-checkout-session'
     ]],
-    "Apple pay": [re.compile(pattern, re.IGNORECASE) for pattern in [
+    "apple_pay": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'apple-pay\.js', r'data-apple-pay', r'apple-pay-button', r'apple-pay-checkout-sdk',
         r'apple-pay-session', r'apple-pay-payment-request', r'ApplePaySession', r'apple-pay-merchant-id',
         r'apple-pay-payment', r'apple-pay-sdk', r'data-apple-pay-token', r'apple-pay-checkout',
         r'apple-pay-domain'
     ]],
-    "Google pay": [re.compile(pattern, re.IGNORECASE) for pattern in [
+    "google_pay": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'pay\.google\.com', r'googlepay\.js', r'data-google-pay', r'google-pay-button',
         r'google-pay-checkout-sdk', r'google-pay-tokenization', r'payments\.googleapis\.com',
         r'google\.payments\.api', r'google-pay-token', r'google-pay-payment-method',
@@ -248,76 +248,53 @@ PAYMENT_INDICATORS = [
     "express-checkout", "quick-buy", "one-click-buy", "instant-purchase"
 ]
 
+
 # Non-HTML extensions
 NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf'}
 
 # Skip domains
-SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com'}
+SKIP_DOMAINS = {'twitter.com', 'facebook.com', 'youtube.com'}
 
-# User-Agent strings
+# User-Agent strings (matching let1.py)
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Mobile Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
 ]
 
 # Create cloudscraper instance
 def create_scraper():
     return cloudscraper.create_scraper(
         browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False},
-        delay=2.0  # CHANGED: delay=1.0 to 2.0 for Cloudflare
+        delay=0.5
     )
 
 # Validate URL
-def is_valid_url(url, base_domain):  # CHANGED: Simplified logic
+def is_valid_url(url, base_domain):
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
     path = parsed.path.lower()
     if domain in SKIP_DOMAINS:
         return False
-    # Allow same domain or payment gateways
-    if domain == base_domain or any(gw in domain for gw in ['paypal.com', 'stripe.com', 'braintreegateway.com', 'adyen.com', 'authorize.net', 'squareup.com', 'klarna.com', 'checkout.com', 'razorpay.com', 'paytm.in', 'shopify.com', 'worldpay.com', '2co.com', 'amazon.com', 'apple.com', 'google.com', 'mollie.com', 'opayo.eu', 'paddle.com']):
-        if not any(path.endswith(ext) for ext in NON_HTML_EXTENSIONS):
-            return True
-    return False
-
-# Check URL status
-def check_url_status(url, scraper):
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html',
-        'Connection': 'keep-alive',
-        'Referer': 'https://www.google.com/',
-        'DNT': '1',
-        'Cache-Control': 'no-cache'
-    }
-    try:
-        response = scraper.head(url, headers=headers, timeout=5, allow_redirects=True)
-        return response.status_code == 200
-    except requests.RequestException:
+    if domain != base_domain:
         return False
+    if any(path.endswith(ext) for ext in NON_HTML_EXTENSIONS):
+        return False
+    return True
 
 # Fetch URL content
 def fetch_url(url, scraper):
-    if not check_url_status(url, scraper):
-        logger.debug(f"Skipping non-200 URL: {url}")
-        return "", url
     headers = {
         'User-Agent': random.choice(USER_AGENTS),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
-        'Referer': 'https://www.google.com/',
-        'DNT': '1',
-        'Cache-Control': 'no-cache'
+        'Referer': 'https://www.google.com/'
     }
     try:
-        response = scraper.get(url, headers=headers, timeout=30, allow_redirects=True)
+        response = scraper.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
-            logger.debug(f"Returning: {url}: {response.text[:100]}")
+            logger.debug(f"Fetched {url}")
             return response.text, url
         logger.debug(f"Non-200 status {response.status_code} for {url}")
         return "", url
@@ -325,7 +302,7 @@ def fetch_url(url, scraper):
         logger.error(f"Error fetching {url}: {str(e)}")
         return "", url
 
-# Get all sources with payment indicators
+# Get all sources
 def get_all_sources(url, html_content, base_domain):
     if not html_content:
         return []
@@ -333,8 +310,8 @@ def get_all_sources(url, html_content, base_domain):
         soup = BeautifulSoup(html_content, 'lxml')
         sources = deque()
         url_lower = url.lower()
-        for tag in soup.find_all(['a', 'button', 'script', 'iframe', 'form']):
-            href = tag.get('href') or tag.get('src') or tag.get('action')
+        for tag in soup.find_all(['a', 'script']):
+            href = tag.get('href') or tag.get('src')
             if not href:
                 continue
             full_url = urljoin(url, href).lower()
@@ -345,12 +322,6 @@ def get_all_sources(url, html_content, base_domain):
             score = 1
             if any(p in full_url for p in PAYMENT_INDICATORS):
                 score += 4
-            classes = tag.get('class', []) or []
-            if classes and any(isinstance(cls, str) and any(p in cls.lower() for p in PAYMENT_INDICATORS) for cls in classes):
-                score += 1
-            text = tag.get_text(strip=True).lower()
-            if text and any(p in text for p in PAYMENT_INDICATORS):
-                score += 1
             sources.append((full_url, score))
         sources = [url for url, score in sorted(sources, key=lambda x: x[1], reverse=True)][:12]
         logger.info(f"Selected {len(sources)} sources for {url}: {sources}")
@@ -362,9 +333,9 @@ def get_all_sources(url, html_content, base_domain):
 # Detect features
 def detect_features(html_content, file_url, detected_gateways):
     if not html_content or not html_content.strip():
-        return set(), set(), set(), set(), False, [], "False"
+        return set(), set(), set(), set(), False, set(), "False"
     detected_gateways_set = set()
-    detected_3d_set = set()
+    detected_3d = set()
     detected_captcha = set()
     detected_platforms = set()
     detected_cards = set()
@@ -380,9 +351,9 @@ def detect_features(html_content, file_url, detected_gateways):
                 logger.info(f"Detected {gateway} with pattern {pattern.pattern}")
                 detected_gateways_set.add(gateway.capitalize())
                 detected_gateways.append(gateway.capitalize())
-                for tld_pattern in THREE_D_SECURE_KEYWORDS:
-                    if tld_pattern.search(content_lower):
-                        detected_3d_set.add(gateway.capitalize())
+                for tds_pattern in THREE_D_SECURE_KEYWORDS:
+                    if tds_pattern.search(content_lower):
+                        detected_3d.add(gateway.capitalize())
                         break
                 break
 
@@ -410,14 +381,14 @@ def detect_features(html_content, file_url, detected_gateways):
     # GraphQL
     graphql_detected = "True" if "graphql" in content_lower else "False"
 
-    return detected_gateways_set, detected_3d_set, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
+    return detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
 
 # Crawl worker
 def crawl_worker(args):
     url, max_depth, visited, content_hashes, base_domain, detected_gateways = args
     if url in visited or len(visited) > 50:
         return []
-    visited.add(url)  # CHANGED: append to add (set operation)
+    visited.add(url)
     if max_depth < 1 or not is_valid_url(url, base_domain):
         return []
     scraper = create_scraper()
@@ -427,7 +398,7 @@ def crawl_worker(args):
     content_hash = hashlib.md5(html_content.encode('utf-8')).hexdigest()
     if content_hash in content_hashes:
         return [(html_content, fetched_url)]
-    content_hashes.add(content_hash)  # CHANGED: append to add
+    content_hashes.add(content_hash)
     results = [(html_content, fetched_url)]
     sources = get_all_sources(fetched_url, html_content, base_domain)
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -437,11 +408,11 @@ def crawl_worker(args):
             if content:
                 content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
                 if content_hash not in content_hashes:
-                    content_hashes.add(content_hash)  # CHANGED: append to add
+                    content_hashes.add(content_hash)
                     results.append((content, source_url))
     if max_depth > 1:
         sub_args = [(source, max_depth - 1, visited, content_hashes, base_domain, detected_gateways) for source in sources]
-        with Pool(processes=4) as pool:  # CHANGED: processes=8 to 4
+        with Pool(processes=4) as pool:
             sub_results = pool.map(crawl_worker, sub_args)
             for sub_result in sub_results:
                 results.extend(sub_result)
@@ -469,43 +440,39 @@ def get_country_from_tld_or_ip(url, ip):
         if tld in tld_country_map:
             return tld_country_map[tld]
     except:
-        return
+        pass
     try:
         res = requests.get(f"https://ipapi.co/{ip}/country_name/", timeout=5)
         if res.status_code == 200:
             return res.text.strip()
     except:
-        return "Unknown"
+        pass
+    return "Unknown"
 
 # Main scanning function
 def scan_website(url: str, max_depth: int = 2) -> dict:
-    """
-    Scan a website for payment gateways, captchas, and other features.
-    """
     try:
         # Validate URL
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
         parsed = tldextract.extract(url)
-        if not (parsed.domain and parsed.suffix) or url.isdigit() or not any(c.isalpha() for c in url):
-            return {"success": False, "error": "Invalid URL! Please provide a valid website URL."}
+        if not (parsed.domain and parsed.suffix):
+            return {"success": False, "error": "Invalid URL!"}
 
         start_time = time.time()
         visited = set()
         content_hashes = set()
-        detected_gateways = []  # Use list for shared state across processes
+        detected_gateways = []
         base_domain = urlparse(url).netloc.lower()
 
         # Crawl
         resources = crawl_worker((url, max_depth, visited, content_hashes, base_domain, detected_gateways))
         if not resources or not any(html_content for html_content, _ in resources):
-            if "discord.com" in url.lower():
-                return {"success": False, "error": "This site requires manual verification. Please check manually."}
-            return {"success": False, "error": "Failed to scan the website or no valid content retrieved."}
+            return {"success": False, "error": "Failed to scan website."}
 
         # Detect features
         detected_gateways_set = set()
-        detected_3d_set = set()
+        detected_3d = set()
         detected_captcha = set()
         detected_platforms = set()
         cf_detected = False
@@ -517,7 +484,7 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
             for future in futures:
                 gateways, gateways_3d, captcha, platforms, cf, cards, graphql = future.result()
                 detected_gateways_set.update(gateways)
-                detected_3d_set.update(gateways_3d)
+                detected_3d.update(gateways_3d)
                 detected_captcha.update(captcha)
                 detected_platforms.update(platforms)
                 if cf:
@@ -526,20 +493,20 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
                 if graphql == "True":
                     graphql_detected = "True"
 
-        elapsed_time = round(time.time() - start_time, 2)
+        elapsed = round(time.time() - start_time, 2)
         ip_address = get_ip(urlparse(url).netloc)
         country_name = get_country_from_tld_or_ip(url, ip_address)
 
         result = (
             f"🟢 Scan Results for {url}\n"
-            f"⏱️ Time Taken: {elapsed_time}s seconds\n"
+            f"⏱️ Time Taken: {elapsed} seconds\n"
             f"💳 Payment Gateways: {', '.join(sorted(detected_gateways_set)) if detected_gateways_set else 'None'}\n"
-            f"🔲 Captcha: {', '.join(sorted(detected_captcha)) if detected_captcha else 'Not Found 🥳'}\n"
-            f"🛡 Shield: {'Found 🔒' if cf_detected else 'Not Found 🥳'}\n"
+            f"🔒 Captcha: {', '.join(sorted(detected_captcha)) if detected_captcha else 'Not Found 🥳'}\n"
+            f"🛡️ Cloudflare: {'Found 🔒' if cf_detected else 'Not Found 🥳'}\n"
             f"📊 GraphQL: {graphql_detected}\n"
             f"🖥️ Platforms: {', '.join(sorted(detected_platforms)) if detected_platforms else 'Unknown'}\n"
             f"🌍 Country: {country_name}\n"
-            f"🔐 Secure: {'ENABLED' if detected_3d_set else 'DISABLED'}\n"
+            f"🔐 3D Secure: {'ENABLED' if detected_3d else 'DISABLED'}\n"
             f"💳 Cards: {', '.join(sorted(detected_cards)) if detected_cards else 'None'}"
         )
 
@@ -548,29 +515,26 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
             "result": result,
             "data": {
                 "url": url,
-                "time_taken": elapsed_time,
-                "gateways": sorted(detected_gateways_set),  # Fixed key from "cards" to "gateways"
+                "time_taken": elapsed,
+                "payment_gateways": sorted(detected_gateways_set),
                 "captcha": sorted(detected_captcha),
                 "cloudflare": cf_detected,
                 "graphql": graphql_detected,
                 "platforms": sorted(detected_platforms),
                 "country": country_name,
-                "3d_secure": bool(detected_3d_set),
+                "3d_secure": bool(detected_3d),
                 "cards": sorted(detected_cards)
             }
         }
 
     except Exception as e:
         return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
 # Initialize FastAPI app
 app = FastAPI()
 
 @app.get("/sexy_api/gate")
 async def gateway_hunter(url: HttpUrl):
-    """
-    API endpoint to scan a URL and return gateway results.
-    Example: /sexy_api/gate?url=https://example.com
-    """
     result = scan_website(str(url))
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
