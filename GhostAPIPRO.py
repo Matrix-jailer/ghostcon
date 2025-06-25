@@ -415,7 +415,7 @@ def detect_features(html_content, file_url, detected_gateways):
 # Crawl worker
 def crawl_worker(args):
     url, max_depth, visited, content_hashes, base_domain, detected_gateways = args
-    if url in visited or len(visited) > 50:
+    if url in visited or len(visited) > 25:
         return []
     visited.append(url)
     if max_depth < 1 or not is_valid_url(url, base_domain):
