@@ -504,8 +504,6 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
                 return {"success": False, "error": "This site requires manual verification. Please check manually."}
             return {"success": False, "error": "Failed to scan the website or no valid content retrieved."}
 
-        }
-
         # Detect features
         detected_gateways_set = set()
         detected_3d_set = set()
