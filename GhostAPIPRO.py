@@ -430,7 +430,7 @@ def crawl_worker(args):
     content_hashes.append(content_hash)
     results = [(html_content, fetched_url)]
     sources = get_all_sources(fetched_url, html_content, base_domain)
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(fetch_url, source, scraper) for source in sources]
         for future in futures:
             content, source_url = future.result()
@@ -441,7 +441,7 @@ def crawl_worker(args):
                     results.append((content, source_url))
     if max_depth > 1:
         sub_args = [(source, max_depth - 1, visited, content_hashes, base_domain, detected_gateways) for source in sources]
-        with Pool(processes=8) as pool:
+        with Pool(processes=4) as pool:
             sub_results = pool.map(crawl_worker, sub_args)
             for sub_result in sub_results:
                 results.extend(sub_result)
@@ -511,7 +511,7 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
         detected_cards = set()
         graphql_detected = "False"
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {executor.submit(detect_features, html, file_url, detected_gateways): file_url for html, file_url in resources}
             for future in futures:
                 gateways, gateways_3d, captcha, platforms, cf, cards, graphql = future.result()
