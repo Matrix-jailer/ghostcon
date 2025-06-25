@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import HttpUrl
+from fastapi import BackgroundTasks
 import time
 import socket
 import tldextract
@@ -566,12 +567,15 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
 app = FastAPI()
 
 @app.get("/sexy_api/gate")
-async def gateway_hunter(url: HttpUrl):
+async def gateway_hunter(url: HttpUrl, background_tasks: BackgroundTasks):
     """
-    API endpoint to scan a URL and return gateway results.
-    Example: /sexy_api/gate?url=https://example.com
+    Starts scan in background and returns immediately.
     """
-    result = scan_website(str(url), max_depth=1)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    def run_scan():
+        result = scan_website(str(url), max_depth=1)
+        # For now: just log the result. Later: save to DB or file.
+        logger.info(f"Background scan complete:\n{result}")
+
+    background_tasks.add_task(run_scan)
+
+    return {"status": "started", "message": "Scan started in background. Check logs for results."}
