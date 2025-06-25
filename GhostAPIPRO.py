@@ -491,10 +491,9 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
             return {"success": False, "error": "Invalid URL! Please provide a valid website URL."}
 
         start_time = time.time()
-        visited = Manager()  # CHANGED: Replaced with set()
         visited = set()
-        content_hashes = set()  # CHANGED: Replaced with set()
-        detected_gateways = set()  # CHANGED: Replaced with set()
+        content_hashes = set()
+        detected_gateways = []  # Use list for shared state across processes
         base_domain = urlparse(url).netloc.lower()
 
         # Crawl
@@ -511,39 +510,36 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
         detected_platforms = set()
         cf_detected = False
         detected_cards = set()
-        detected_graphql_detected = "False"
+        graphql_detected = "False"
 
-        detected = False
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {executor:.submit(detect_features_, html, file_url_, detected_gateways,): file_url for html, file_url in resources}
+            futures = {executor.submit(detect_features, html, file_url, detected_gateways): file_url for html, file_url in resources}
             for future in futures:
-                gateways_, gateways_3d_, captcha_, platforms_, cf_, cards_, graphql_ = future.result()
-                detected_gateways_set.update(gateways_)
-                detected_set_3d.update(gateways_3d_)
-                detected_captcha.update(captcha_)
-                detected_platforms.update(platforms_)
-                if cf_:
+                gateways, gateways_3d, captcha, platforms, cf, cards, graphql = future.result()
+                detected_gateways_set.update(gateways)
+                detected_3d_set.update(gateways_3d)
+                detected_captcha.update(captcha)
+                detected_platforms.update(platforms)
+                if cf:
                     cf_detected = True
-                detected
-                detected_cards.update(cards_)
-                detected_cards
-                if graphql_detected == "True":
+                detected_cards.update(cards)
+                if graphql == "True":
                     graphql_detected = "True"
 
         elapsed_time = round(time.time() - start_time, 2)
         ip_address = get_ip(urlparse(url).netloc)
-        country_name = get_country_from_tld(url, ip_address)
+        country_name = get_country_from_tld_or_ip(url, ip_address)
 
         result = (
             f"🟢 Scan Results for {url}\n"
             f"⏱️ Time Taken: {elapsed_time}s seconds\n"
-            f"💳 Payment Gateways: {', '.join(sorted(detected_gatways_set)) if detected_gateways_set else 'None'}\n"
-            f"🔲 Captcha: {', '.join(sorted(detected_capthca)) if detected_captcha else 'Not Found 🥳'}n"
+            f"💳 Payment Gateways: {', '.join(sorted(detected_gateways_set)) if detected_gateways_set else 'None'}\n"
+            f"🔲 Captcha: {', '.join(sorted(detected_captcha)) if detected_captcha else 'Not Found 🥳'}\n"
             f"🛡 Shield: {'Found 🔒' if cf_detected else 'Not Found 🥳'}\n"
             f"📊 GraphQL: {graphql_detected}\n"
-            f"🖥️ Platforms: {', '.join(sorted(detected_plats)) if detected_platforms else 'Unknown'}\n"
+            f"🖥️ Platforms: {', '.join(sorted(detected_platforms)) if detected_platforms else 'Unknown'}\n"
             f"🌍 Country: {country_name}\n"
-            f"🔐 Secure: {'ENABLED' if detected_3d else 'DISABLED'}\n"
+            f"🔐 Secure: {'ENABLED' if detected_3d_set else 'DISABLED'}\n"
             f"💳 Cards: {', '.join(sorted(detected_cards)) if detected_cards else 'None'}"
         )
 
@@ -552,21 +548,20 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
             "result": result,
             "data": {
                 "url": url,
-                "time_taken": elapsed,
-                "cards": sorted(detected_gateways_set),
+                "time_taken": elapsed_time,
+                "gateways": sorted(detected_gateways_set),  # Fixed key from "cards" to "gateways"
                 "captcha": sorted(detected_captcha),
                 "cloudflare": cf_detected,
                 "graphql": graphql_detected,
                 "platforms": sorted(detected_platforms),
                 "country": country_name,
-                "3d_secure": bool(detected_3d),
+                "3d_secure": bool(detected_3d_set),
                 "cards": sorted(detected_cards)
             }
         }
 
     except Exception as e:
         return {"success": False, "error": f"Unexpected error: {str(e)}"}
-
 # Initialize FastAPI app
 app = FastAPI()
 
