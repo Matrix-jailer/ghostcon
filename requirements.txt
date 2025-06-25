@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-pydantic
 cloudscraper
-beautifulsoup4
-tldextract
 requests
+beautifulsoup4
+lxml
+tldextract
