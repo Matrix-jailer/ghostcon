@@ -571,7 +571,7 @@ async def gateway_hunter(url: HttpUrl):
     API endpoint to scan a URL and return gateway results.
     Example: /sexy_api/gate?url=https://example.com
     """
-    result = scan_website(str(url))
+    result = scan_website(str(url), max_depth=1)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
