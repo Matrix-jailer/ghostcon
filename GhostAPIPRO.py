@@ -628,7 +628,10 @@ jobs = {}
 # Your existing scan_website function must be defined above
 
 def background_scan(url: str, job_id: str):
-    result = scan_website(url, max_depth=1)
+    try:
+        result = scan_website(url, max_depth=1)
+    except Exception as e:
+        result = {"success": False, "error": f"Unexpected error in background scan: {str(e)}"}
     jobs[job_id]["status"] = "done"
     jobs[job_id]["result"] = result
 
