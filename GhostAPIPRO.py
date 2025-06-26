@@ -1,3 +1,4 @@
+from threading import Lock
 from fastapi import FastAPI, HTTPException
 from pydantic import HttpUrl
 import time
@@ -67,6 +68,55 @@ CAPTCHA_PATTERNS = {
     ]
 }
 
+from threading import Lock
+
+# Proxy management
+proxy_pool = []
+proxy_lock = Lock()
+
+def fetch_proxies():
+    url = "https://www.proxy-list.download/api/v1/get?type=https"
+    try:
+        res = requests.get(url, timeout=10)
+        proxies = [p.strip() for p in res.text.splitlines() if p.strip()]
+        return proxies
+    except Exception as e:
+        logger.error(f"Proxy fetch failed: {e}")
+        return []
+
+def test_proxy(proxy):
+    try:
+        test_url = "https://httpbin.org/ip"
+        res = requests.get(test_url, proxies={"http": f"http://{proxy}", "https": f"http://{proxy}"}, timeout=5)
+        return res.status_code == 200
+    except:
+        return False
+
+def refresh_proxy_pool():
+    proxies = fetch_proxies()
+    valid_proxies = []
+    for proxy in proxies:
+        if test_proxy(proxy):
+            valid_proxies.append(proxy)
+    with proxy_lock:
+        proxy_pool.clear()
+        proxy_pool.extend(valid_proxies)
+    logger.info(f"Proxy pool refreshed with {len(valid_proxies)} working proxies.")
+
+def get_random_proxy():
+    with proxy_lock:
+        if not proxy_pool:
+            refresh_proxy_pool()
+        if not proxy_pool:
+            return None
+        proxy = random.choice(proxy_pool)
+        if test_proxy(proxy):
+            return proxy
+        else:
+            proxy_pool.remove(proxy)
+            return get_random_proxy()
+
+
 # Platform keywords
 PLATFORM_KEYWORDS = {
     "woocommerce": "WooCommerce",
@@ -116,7 +166,7 @@ GATEWAY_KEYWORDS = {
     "paypal": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'api\.paypal\.com', r'paypal\.com', r'paypal-sdk\.com', r'paypal\.js', r'paypalobjects\.com', r'paypal_express_checkout', r'e\.PAYPAL_EXPRESS_CHECKOUT',
         r'paypal-button', r'paypal-checkout-sdk', r'paypal-sdk\.js', r'paypal-smart-button', r'paypal_express_checkout/api',
-        r'paypal-rest-sdk', r'paypal-transaction', r'itch\.io/api-transaction/paypal',
+        r'paypal-rest-sdk', r'paypal-transaction', r'itch\.io/api-transaction/paypal', r'in-context-paypal-metadata',
         r'PayPal\.Buttons', r'paypal\.Buttons', r'data-paypal-client-id', r'paypal\.com/sdk/js',
         r'paypal\.Order\.create', r'paypal-checkout-component', r'api-m\.paypal\.com', r'paypal-funding',
         r'paypal-hosted-fields', r'paypal-transaction-id', r'paypal\.me', r'paypal\.com/v2/checkout',
@@ -294,7 +344,10 @@ def check_url_status(url, scraper):
         'Cache-Control': 'no-cache'
     }
     try:
-        response = scraper.head(url, headers=headers, timeout=5, allow_redirects=True)
+        proxy = get_random_proxy()
+        proxies = {"http": f"http://{proxy}", "https": f"http://{proxy}"} if proxy else None
+        response = scraper.head(url, headers=headers, timeout=5, allow_redirects=True, proxies=proxies)
+
         return response.status_code == 200
     except requests.RequestException:
         return False
@@ -315,7 +368,10 @@ def fetch_url(url, scraper):
         'Cache-Control': 'no-cache'
     }
     try:
-        response = scraper.get(url, headers=headers, timeout=30, allow_redirects=True)
+        proxy = get_random_proxy()
+        proxies = {"http": f"http://{proxy}", "https": f"http://{proxy}"} if proxy else None
+        response = scraper.get(url, headers=headers, timeout=30, allow_redirects=True, proxies=proxies)
+
         if response.status_code == 200:
             logger.debug(f"Fetched {url}: {response.text[:100]}")
             return response.text, url
