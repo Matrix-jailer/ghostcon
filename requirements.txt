@@ -1,9 +1,8 @@
 fastapi
 uvicorn[standard]
-beautifulsoup4
-cloudscraper
-pydantic
 requests
+beautifulsoup4
+selenium
 tldextract
 lxml
 httpx
