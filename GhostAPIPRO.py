@@ -1,23 +1,30 @@
 import os
-import threading
-from threading import Lock
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import HttpUrl
-from uuid import uuid4
 import time
-import socket
-import tldextract
-from urllib.parse import urljoin, urlparse
-from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor
-import cloudscraper
-import requests
-import random
-import re
-import logging
-import hashlib
+import threading
+from uuid import uuid4
+from urllib.parse import urlparse, urljoin
 from collections import deque
-from multiprocessing import Pool, Manager
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Manager, Pool
+import hashlib
+import random
+import logging
+
+from fastapi import FastAPI, HTTPException
+from pydantic import HttpUrl
+
+from bs4 import BeautifulSoup
+import requests  # for check_url_status if still used
+
+import selenium
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException
+
+import tldextract
+
+# Your other imports (re, etc.) based on your full script
+
 
 # Configure logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -268,66 +275,89 @@ USER_AGENTS = [
 ]
 
 # Create cloudscraper instance
-def create_scraper():
-    return cloudscraper.create_scraper(
-        browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False},
-        delay=1.0
-    )
+def create_selenium_driver():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")  # needed for some Linux envs like render
+    options.add_argument("--disable-dev-shm-usage")  # for Docker / limited memory environments
+    options.add_argument("--window-size=1920,1080")
+    driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(30)
+    return driver
 
 # Validate URL
+from urllib.parse import urlparse
+
+PAYMENT_GATEWAY = [
+    'paypal.com', 'stripe.com', 'braintreegateway.com', 'adyen.com', 'authorize.net',
+    'squareup.com', 'klarna.com', 'checkout.com', 'razorpay.com', 'paytm.in',
+    'shopify.com', 'worldpay.com', '2co.com', 'amazon.com', 'apple.com', 'google.com',
+    'mollie.com', 'opayo.eu', 'paddle.com'
+]
+
+NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf'}
+SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com'}
+PAYMENT_GATEWAY = [
+    'paypal.com', 'stripe.com', 'braintreegateway.com', 'adyen.com', 'authorize.net',
+    'squareup.com', 'klarna.com', 'checkout.com', 'razorpay.com', 'paytm.in',
+    'shopify.com', 'worldpay.com', '2co.com', 'amazon.com', 'apple.com', 'google.com',
+    'mollie.com', 'opayo.eu', 'paddle.com'
+]
+
+
 def is_valid_url(url, base_domain):
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
     path = parsed.path.lower()
+
+    # Skip unwanted domains
     if domain in SKIP_DOMAINS:
         return False
-    if domain != base_domain and not any(gw in domain for gw in ['paypal.com', 'stripe.com', 'braintreegateway.com', 'adyen.com', 'authorize.net', 'squareup.com', 'klarna.com', 'checkout.com', 'razorpay.com', 'paytm.in', 'shopify.com', 'worldpay.com', '2co.com', 'amazon.com', 'apple.com', 'google.com', 'mollie.com', 'opayo.eu', 'paddle.com']):
+
+    # Allow same domain or trusted payment gateways
+    # Include subdomains of base_domain, e.g. sub.example.com
+    if not (domain == base_domain or domain.endswith('.' + base_domain)) and not any(gw in domain for gw in PAYMENT_GATEWAY):
         return False
+
+    # Skip non-HTML resources
     if any(path.endswith(ext) for ext in NON_HTML_EXTENSIONS):
         return False
+
     return True
 
+
+
 # Check URL status
-def check_url_status(url, scraper):
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html',
-        'Connection': 'keep-alive',
-        'Referer': 'https://www.google.com/',
-        'DNT': '1',
-        'Cache-Control': 'no-cache'
-    }
+def check_url_status_selenium(url):
+    driver = create_selenium_driver()
     try:
-        response = scraper.head(url, headers=headers, timeout=5, allow_redirects=True)
-        return response.status_code == 200
-    except requests.RequestException:
+        driver.set_page_load_timeout(10)
+        driver.get(url)
+        # If page loads without exception, return True
+        return True
+    except (TimeoutException, WebDriverException):
         return False
+    finally:
+        driver.quit()
 
 # Fetch URL content
-def fetch_url(url, scraper):
-    if not check_url_status(url, scraper):
-        logger.debug(f"Skipping non-200 URL: {url}")
-        return "", url
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Referer': 'https://www.google.com/',
-        'DNT': '1',
-        'Cache-Control': 'no-cache'
-    }
+def fetch_url_selenium(url):
+    driver = None
     try:
-        response = scraper.get(url, headers=headers, timeout=30, allow_redirects=True)
-        if response.status_code == 200:
-            logger.debug(f"Fetched {url}: {response.text[:100]}")
-            return response.text, url
-        logger.debug(f"Non-200 status {response.status_code} for {url}")
+        driver = create_selenium_driver()
+        driver.get(url)
+        time.sleep(3)  # wait for JS to load; adjust if needed
+        page_source = driver.page_source
+        final_url = driver.current_url
+        return page_source, final_url
+    except WebDriverException as e:
+        print(f"Selenium error fetching {url}: {e}")
         return "", url
-    except requests.RequestException as e:
-        logger.error(f"Error fetching {url}: {str(e)}")
-        return "", url
+    finally:
+        if driver:
+            driver.quit()
+
 
 # Get all sources with payment indicators
 def get_all_sources(url, html_content, base_domain):
@@ -424,18 +454,21 @@ def crawl_worker(args):
     visited.append(url)
     if max_depth < 1 or not is_valid_url(url, base_domain):
         return []
-    scraper = create_scraper()
-    html_content, fetched_url = fetch_url(url, scraper)
+
+    html_content, fetched_url = fetch_url_selenium(url)  # changed here to selenium fetch
     if not html_content:
         return [(html_content, fetched_url)]
+    
     content_hash = hashlib.md5(html_content.encode('utf-8')).hexdigest()
     if content_hash in content_hashes:
         return [(html_content, fetched_url)]
+    
     content_hashes.append(content_hash)
     results = [(html_content, fetched_url)]
     sources = get_all_sources(fetched_url, html_content, base_domain)
+    
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(fetch_url, source, scraper) for source in sources]
+        futures = [executor.submit(fetch_url_selenium, source) for source in sources]
         for future in futures:
             content, source_url = future.result()
             if content:
@@ -443,6 +476,7 @@ def crawl_worker(args):
                 if content_hash not in content_hashes:
                     content_hashes.append(content_hash)
                     results.append((content, source_url))
+
     if max_depth > 1:
         sub_args = [(source, max_depth - 1, visited, content_hashes, base_domain, detected_gateways) for source in sources]
         with Pool(processes=8) as pool:
@@ -450,6 +484,7 @@ def crawl_worker(args):
             for sub_result in sub_results:
                 results.extend(sub_result)
     return results
+
 
 # Get IP address
 def get_ip(domain):
