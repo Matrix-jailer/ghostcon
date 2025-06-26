@@ -6,6 +6,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 from seleniumwire import webdriver
+from urllib.parse import urljoin
 import tldextract
 import threading
 from uuid import uuid4
@@ -15,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Manager, Pool
 import hashlib
 import random
+from multiprocessing import Pool
 import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import HttpUrl
@@ -314,26 +316,28 @@ GATEWAY_KEYWORDS = {
 }
 
 # Payment indicators
-PAYMENT_INDICATORS = [
-    "cart", "checkout", "payment", "buy", "purchase", "order", "billing", "subscribe",
-    "shop", "store", "pricing", "add-to-cart", "pay-now", "secure-checkout", "complete-order",
-    "transaction", "invoice", 'checkout2', "donate", "donation", "add-to-bag", "add-to-basket",
-    "shop-now", "buy-now", "order-now", "proceed-to-checkout", "pay", "payment-method",
-    "credit-card", "debit-card", "place-order", 'docs', "confirm-purchase", "get-started",
-    "sign-up", "join-now", "membership", "upgrade", "renew", "trial", "subscribe-now",
-    "book-now", "reserve", "back-now", "fund", "pledge", "support", "contribute",
-    "complete-purchase", "finalize-order", "payment-details", "billing-info",
-    "secure-payment", "pay-securely", "shop-secure", "trial", "subscribe", "subscription",
-    "give", "donate-now", "donatenow", "donate_now", "get-now", "browse", "category",
-    "items", "product", "item", "pay-now", "giftcard", "topup", "plans", "buynow",
-    "sell", "sell-now", "purchase-now", "shopnow", "shopping", "menu", "games",
-    "accessories", "men", "women", "collections", "sale", "vps", "server", "about",
-    "about-us", "shirt", "pant", "hoodie", "keys", "cart-items", "buy-secure", "cart-page",
-    "basket", "checkout-page", "order-summary", "payment-form", "purchase-flow",
-    "shop-cart", "ecommerce", "store-cart", "buy-button", "purchase-button",
-    "add-item", "remove-item", "cart-update", "apply-coupon", "redeem-code",
-    "discount-code", "promo-code", "gift-card", "pay-with", "payment-options",
-    "express-checkout", "quick-buy", "one-click-buy", "instant-purchase"
+PAYMENT_INDICATOR_REGEX = [
+    re.compile(rf"\b{kw}\b", re.IGNORECASE)
+    for kw in [
+        "cart", "checkout", "payment", "buy", "purchase", "order", "billing", "subscribe",
+        "shop", "store", "pricing", "add-to-cart", "pay-now", "secure-checkout", "complete-order",
+        "transaction", "invoice", "checkout2", "donate", "donation", "add-to-bag", "add-to-basket",
+        "shop-now", "buy-now", "order-now", "proceed-to-checkout", "pay", "payment-method",
+        "credit-card", "debit-card", "place-order", "confirm-purchase", "get-started",
+        "sign-up", "join-now", "membership", "upgrade", "renew", "trial", "subscribe-now",
+        "book-now", "reserve", "fund", "pledge", "support", "contribute",
+        "complete-purchase", "finalize-order", "payment-details", "billing-info",
+        "secure-payment", "pay-securely", "shop-secure", "give", "donate-now", "donatenow",
+        "donate_now", "get-now", "browse", "category", "items", "product", "item",
+        "giftcard", "topup", "plans", "buynow", "sell", "sell-now", "purchase-now",
+        "shopnow", "shopping", "menu", "games", "accessories", "men", "women",
+        "collections", "sale", "vps", "server", "about", "about-us", "shirt", "pant",
+        "hoodie", "keys", "cart-items", "buy-secure", "cart-page", "basket", "checkout-page",
+        "order-summary", "payment-form", "purchase-flow", "shop-cart", "ecommerce", "store-cart",
+        "buy-button", "purchase-button", "add-item", "remove-item", "cart-update",
+        "apply-coupon", "redeem-code", "discount-code", "promo-code", "gift-card", "pay-with",
+        "payment-options", "express-checkout", "quick-buy", "one-click-buy", "instant-purchase"
+    ]
 ]
 
 # Non-HTML extensions
@@ -456,39 +460,70 @@ def fetch_url_selenium(url):
             driver.quit()
 
 
-# Get all sources with payment indicators
-def get_all_sources(url, html_content, base_domain):
-    if not html_content:
-        return []
-    try:
-        soup = BeautifulSoup(html_content, 'lxml')
-        sources = deque()
-        url_lower = url.lower()
-        for tag in soup.find_all(['a', 'button', 'script', 'iframe', 'form']):
-            href = tag.get('href') or tag.get('src') or tag.get('action')
-            if not href:
-                continue
-            full_url = urljoin(url, href).lower()
-            if not full_url.startswith(('http://', 'https://')) or full_url.split('#')[0] == url_lower.split('#')[0]:
-                continue
-            if not is_valid_url(full_url, base_domain):
-                continue
-            score = 1
-            if any(p in full_url for p in PAYMENT_INDICATORS):
-                score += 4
-            classes = tag.get('class') or []
-            if classes and any(isinstance(cls, str) and any(p in cls.lower() for p in PAYMENT_INDICATORS) for cls in classes):
-                score += 1
-            text = tag.get_text(strip=True).lower()
-            if text and any(p in text for p in PAYMENT_INDICATORS):
-                score += 1
-            sources.append((full_url, score))
-        sources = [url for url, score in sorted(sources, key=lambda x: x[1], reverse=True)][:12]
-        logger.info(f"Selected {len(sources)} sources for {url}: {sources}")
-        return sources
-    except Exception as e:
-        logger.error(f"Error parsing sources for {url}: {str(e)}")
-        return []
+
+def extract_links_from_buttons_and_anchors(html, base_url):
+    """Extracts useful links from <a>, <button>, <form>, and JS onclicks."""
+    soup = BeautifulSoup(html, "lxml")
+    found_urls = set()
+
+    # Anchor tag hrefs
+    for a in soup.find_all("a", href=True):
+        full_url = urljoin(base_url, a["href"])
+        found_urls.add(full_url)
+
+    # JS button redirects: window.location='/...' or window.location.href='...'
+    for btn in soup.find_all("button"):
+        onclick = btn.get("onclick", "")
+        match = re.search(r"""window\.location(?:\.href)?\s*=\s*['"]([^'"]+)['"]""", onclick)
+        if match:
+            full_url = urljoin(base_url, match.group(1))
+            found_urls.add(full_url)
+
+    # Onclicks with full URLs from any tag
+    for tag in soup.find_all(["button", "input"]):
+        onclick = tag.get("onclick", "")
+        match = re.search(r"['\"](https?://[^'\"]+)['\"]", onclick)
+        if match:
+            found_urls.add(match.group(1))
+
+    # Forms
+    for form in soup.find_all("form", action=True):
+        full_url = urljoin(base_url, form["action"])
+        found_urls.add(full_url)
+
+    return list(found_urls)
+
+
+
+
+def get_all_sources(url, html, base_domain):
+    """
+    Extracts all useful sub-links from a given HTML using indicator regex and clickable buttons.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    all_links = set()
+
+    # Extract links from <a> tags
+    for a in soup.find_all("a", href=True):
+        full_url = urljoin(url, a["href"])
+        if is_valid_url(full_url, base_domain):
+            all_links.add(full_url)
+
+    # Extract links from buttons and onclicks
+    button_links = extract_links_from_buttons_and_anchors(html, url)
+    for link in button_links:
+        if is_valid_url(link, base_domain):
+            all_links.add(link)
+
+    # Filter using PAYMENT_INDICATOR_REGEX
+    filtered_links = [
+        link for link in all_links
+        if any(pattern.search(link.lower()) for pattern in PAYMENT_INDICATOR_REGEX)
+    ]
+
+    return filtered_links if filtered_links else list(all_links)
+
+
 
 # Detect features
 def detect_features(html_content, file_url, detected_gateways):
@@ -552,7 +587,7 @@ def crawl_worker(args):
     if max_depth < 1 or not is_valid_url(url, base_domain):
         return []
 
-    html_content, fetched_url = fetch_url_selenium(url)  # changed here to selenium fetch
+    html_content, fetched_url = fetch_url_selenium(url)
     if not html_content:
         return [(html_content, fetched_url)]
     
@@ -562,17 +597,21 @@ def crawl_worker(args):
     
     content_hashes.append(content_hash)
     results = [(html_content, fetched_url)]
-    sources = get_all_sources(fetched_url, html_content, base_domain)
-    
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(fetch_url_selenium, source) for source in sources]
-        for future in futures:
-            content, source_url = future.result()
-            if content:
-                content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
-                if content_hash not in content_hashes:
-                    content_hashes.append(content_hash)
-                    results.append((content, source_url))
+    raw_sources = get_all_sources(fetched_url, html_content, base_domain)
+    sources = list(set(raw_sources))
+
+    # Recursive crawl for deeper links if max_depth > 1
+    if max_depth > 1:
+        sub_args = [
+            (source, max_depth - 1, visited, content_hashes, base_domain, detected_gateways)
+            for source in sources
+        ]
+        with Pool(processes=8) as pool:
+            sub_results = pool.map(crawl_worker, sub_args)
+            for res in sub_results:
+                results.extend(res)
+
+    return results
 
     if max_depth > 1:
         sub_args = [(source, max_depth - 1, visited, content_hashes, base_domain, detected_gateways) for source in sources]
