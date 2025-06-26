@@ -1,5 +1,6 @@
 import os
 import time
+import re
 import threading
 from uuid import uuid4
 from urllib.parse import urlparse, urljoin
