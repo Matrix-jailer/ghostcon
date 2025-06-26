@@ -1,7 +1,7 @@
-# Use official Python image
+# Use official Python slim image
 FROM python:3.11-slim
 
-# Install dependencies for Chrome and Selenium
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     unzip \
@@ -22,35 +22,37 @@ RUN apt-get update && apt-get install -y \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
+    libu2f-udev \
     xdg-utils \
+    gnupg2 \
     --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome stable
-RUN curl -sSL https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
- && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
- && apt-get update && apt-get install -y google-chrome-stable \
- && rm -rf /var/lib/apt/lists/*
+# Add Google Chrome repo and install Chrome
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/trusted.gpg.d/google.gpg && \
+    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && apt-get install -y google-chrome-stable && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver
-RUN CHROMEDRIVER_VERSION=$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE) && \
-    wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip" && \
+# Install ChromeDriver version 138 to match installed Chrome 138
+RUN wget -O /tmp/chromedriver.zip https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.49/linux64/chromedriver-linux64.zip && \
     unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
-    rm /tmp/chromedriver.zip && \
-    chmod +x /usr/local/bin/chromedriver
+    mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
+    chmod +x /usr/local/bin/chromedriver && \
+    rm -rf /tmp/chromedriver.zip
 
 # Set working directory
 WORKDIR /app
 
-# Copy your requirements and install them
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy your app source code
+# Copy the app
 COPY . .
 
-# Expose port
+# Expose and define port
 ENV PORT=8000
 EXPOSE 8000
 
-# Command to run app with uvicorn
+# Start the FastAPI app using uvicorn
 CMD ["uvicorn", "GhostAPIPRO:app", "--host", "0.0.0.0", "--port", "8000"]
