@@ -631,10 +631,12 @@ jobs = {}
 def background_scan(url: str, job_id: str):
     try:
         result = scan_website(url, max_depth=1)
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["result"] = result
     except Exception as e:
-        result = {"success": False, "error": f"Unexpected error in background scan: {str(e)}"}
-    jobs[job_id]["status"] = "done"
-    jobs[job_id]["result"] = result
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["result"] = {"success": False, "error": f"Background task error: {str(e)}"}
+
 
 @app.get("/sexy_api/gate")
 async def start_scan_get(url: HttpUrl):
@@ -653,3 +655,11 @@ async def get_scan_result(job_id: str):
     if jobs[job_id]["status"] != "done":
         return {"status": "pending"}
     return {"status": "done", "result": jobs[job_id]["result"]}
+
+port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("GhostAPIPRO:app", host="0.0.0.0", port=port)
+
