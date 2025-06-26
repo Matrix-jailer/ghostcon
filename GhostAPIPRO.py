@@ -622,19 +622,24 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
 # Initialize FastAPI app
 app = FastAPI()
 
-# In-memory store for jobs (for testing; replace with Redis/db for production)
+# In-memory job store
 jobs = {}
+
+# Your existing scan_website function must be defined above
 
 def background_scan(url: str, job_id: str):
     result = scan_website(url, max_depth=1)
     jobs[job_id]["status"] = "done"
     jobs[job_id]["result"] = result
 
-@app.post("/sexy_api/gate")
-async def start_scan(url: HttpUrl, background_tasks: BackgroundTasks):
+@app.get("/sexy_api/gate")
+async def start_scan_get(url: HttpUrl):
+    """
+    Starts scan using GET (useful for browsers)
+    """
     job_id = str(uuid4())
     jobs[job_id] = {"status": "pending", "result": None}
-    background_tasks.add_task(background_scan, str(url), job_id)
+    threading.Thread(target=background_scan, args=(str(url), job_id)).start()
     return {"job_id": job_id, "message": "Scan started"}
 
 @app.get("/sexy_api/results/{job_id}")
