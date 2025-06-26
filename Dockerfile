@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     curl \
     gnupg \
+    gnupg2 \
     ca-certificates \
     fonts-liberation \
     libappindicator3-1 \
@@ -24,7 +25,9 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libu2f-udev \
     xdg-utils \
-    gnupg2 \
+    net-tools \
+    iproute2 \
+    dnsutils \
     --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 # Add Google Chrome repo and install Chrome
@@ -33,7 +36,7 @@ RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor
     apt-get update && apt-get install -y google-chrome-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver version 138 to match installed Chrome 138
+# Install ChromeDriver version 138 (for Chrome 138)
 RUN wget -O /tmp/chromedriver.zip https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.49/linux64/chromedriver-linux64.zip && \
     unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
     mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
@@ -47,12 +50,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the app
+# Copy your app code
 COPY . .
 
-# Expose and define port
+# Set environment and port
 ENV PORT=8000
 EXPOSE 8000
 
-# Start the FastAPI app using uvicorn
+# Start the app
 CMD ["uvicorn", "GhostAPIPRO:app", "--host", "0.0.0.0", "--port", "8000"]
