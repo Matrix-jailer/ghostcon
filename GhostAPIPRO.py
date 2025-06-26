@@ -410,25 +410,29 @@ PAYMENT_GATEWAY = [
 ]
 
 
+
+
 def is_valid_url(url, base_domain):
     parsed = urlparse(url)
-    domain = parsed.netloc.lower()
-    path = parsed.path.lower()
 
-    # Skip unwanted domains
-    if domain in SKIP_DOMAINS:
+    # Skip if not HTTP/HTTPS
+    if parsed.scheme not in ("http", "https"):
         return False
 
-    # Allow same domain or trusted payment gateways
-    # Include subdomains of base_domain, e.g. sub.example.com
-    if not (domain == base_domain or domain.endswith('.' + base_domain)) and not any(gw in domain for gw in PAYMENT_GATEWAY):
+    # Skip known static/non-HTML file extensions
+    if any(parsed.path.lower().endswith(ext) for ext in NON_HTML_EXTENSIONS):
         return False
 
-    # Skip non-HTML resources
-    if any(path.endswith(ext) for ext in NON_HTML_EXTENSIONS):
+    # Skip external domains not matching the base
+    if base_domain not in parsed.netloc:
+        return False
+
+    # Skip blacklisted domains
+    if any(domain in parsed.netloc for domain in SKIP_DOMAINS):
         return False
 
     return True
+
 
 
 
