@@ -605,6 +605,6 @@ async def get_scan_result(job_id: str):
 port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 
-if name == "main":
+if __name__ == "__main__":
     import uvicorn
     uvicorn.run("GhostAPIPRO:app", host="0.0.0.0", port=port)
