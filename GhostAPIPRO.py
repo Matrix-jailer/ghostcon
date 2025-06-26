@@ -443,22 +443,22 @@ def check_url_status_selenium(url):
         driver.quit()
 
 # Fetch URL content
-def fetch_url_selenium(url):
+def fetch_url_selenium(url, timeout=15):
     driver = None
     try:
         driver = create_selenium_driver()
         driver.get(url)
-        time.sleep(3)  # wait for JS to load; adjust if needed
+        # Wait until <body> tag is present or timeout
+        WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         page_source = driver.page_source
         final_url = driver.current_url
         return page_source, final_url
-    except WebDriverException as e:
+    except (TimeoutException, WebDriverException) as e:
         print(f"Selenium error fetching {url}: {e}")
         return "", url
     finally:
         if driver:
             driver.quit()
-
 
 
 def extract_links_from_buttons_and_anchors(html, base_url):
