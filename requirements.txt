@@ -4,6 +4,7 @@ requests
 beautifulsoup4
 selenium
 selenium-wire
+blinker
 tldextract
 lxml
 httpx
