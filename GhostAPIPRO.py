@@ -114,8 +114,8 @@ GATEWAY_KEYWORDS = {
         r'stripe-payment', r'stripe\.network', r'stripe-checkout\.js', r'payment-element'
     ]],
     "paypal": [re.compile(pattern, re.IGNORECASE) for pattern in [
-        r'api\.paypal\.com', r'paypal\.com', r'paypal-sdk\.com', r'paypal\.js', r'paypalobjects\.com', 'paypal_express_checkout', 'e\.PAYPAL_EXPRESS_CHECKOUT',
-        r'paypal-button', r'paypal-checkout-sdk', r'paypal-sdk\.js', r'paypal-smart-button', 'paypal_express_checkout/api',
+        r'api\.paypal\.com', r'paypal\.com', r'paypal-sdk\.com', r'paypal\.js', r'paypalobjects\.com', r'paypal_express_checkout', r'e\.PAYPAL_EXPRESS_CHECKOUT',
+        r'paypal-button', r'paypal-checkout-sdk', r'paypal-sdk\.js', r'paypal-smart-button', r'paypal_express_checkout/api',
         r'paypal-rest-sdk', r'paypal-transaction', r'itch\.io/api-transaction/paypal',
         r'PayPal\.Buttons', r'paypal\.Buttons', r'data-paypal-client-id', r'paypal\.com/sdk/js',
         r'paypal\.Order\.create', r'paypal-checkout-component', r'api-m\.paypal\.com', r'paypal-funding',
