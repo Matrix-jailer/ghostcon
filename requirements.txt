@@ -3,6 +3,7 @@ uvicorn[standard]
 requests
 beautifulsoup4
 selenium
+selenium-wire
 tldextract
 lxml
 httpx
