@@ -550,19 +550,31 @@ def detect_features(html_content, file_url, detected_gateways):
 
     content_lower = html_content.lower()
 
-    # Payment gateways
-    for gateway in PAYMENT_GATEWAYS:
-        gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
-        for pattern in gateway_keywords:
-            if pattern.search(content_lower) and gateway.capitalize() not in detected_gateways:
-                logger.info(f"Detected {gateway} with pattern {pattern.pattern}")
-                detected_gateways_set.add(gateway.capitalize())
-                detected_gateways.append(gateway.capitalize())
-                for tds_pattern in THREE_D_SECURE_KEYWORDS:
-                    if tds_pattern.search(content_lower):
-                        detected_3d.add(gateway.capitalize())
-                        break
+for gateway in PAYMENT_GATEWAYS:
+    gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
+    matched_count = 0
+
+    for pattern in gateway_keywords:
+        if pattern.search(content_lower):
+            # ⛔️ Prevent Stripe false positives if embedded via Shopify URLs
+            if gateway.lower() == "stripe" and "shopify" in file_url:
+                continue
+
+            matched_count += 1
+            logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
+
+    # ✅ Only accept gateway if 2+ strong indicators matched
+    if matched_count >= 2 and gateway.capitalize() not in detected_gateways:
+        detected_gateways_set.add(gateway.capitalize())
+        detected_gateways.append(gateway.capitalize())
+
+        # ✅ Only now check 3D Secure terms in a verified gateway page
+        for tds_pattern in THREE_D_SECURE_KEYWORDS:
+            if tds_pattern.search(content_lower):
+                detected_3d.add(gateway.capitalize())
+                logger.info(f"3D Secure detected for {gateway} in {file_url}")
                 break
+
 
     # Captchas
     for category, patterns in CAPTCHA_PATTERNS.items():
