@@ -28,9 +28,9 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     iproute2 \
     dnsutils \
-    fonts-noto-color-emoji \           # Emoji fonts for better rendering if needed
-    libxss1 \                         # Needed for Chrome
-    libxtst6 \                        # Needed for Chrome
+    fonts-noto-color-emoji \
+    libxss1 \
+    libxtst6 \
     --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 # Add Google Chrome repo and install Chrome stable
