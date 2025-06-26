@@ -621,13 +621,25 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
 # Initialize FastAPI app
 app = FastAPI()
 
-@app.get("/sexy_api/gate")
-async def gateway_hunter(url: HttpUrl):
-    """
-    API endpoint to scan a URL and return gateway results.
-    Example: /sexy_api/gate?url=https://example.com
-    """
-    result = scan_website(str(url), max_depth=1)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+# In-memory store for jobs (for testing; replace with Redis/db for production)
+jobs = {}
+
+def background_scan(url: str, job_id: str):
+    result = scan_website(url, max_depth=1)
+    jobs[job_id]["status"] = "done"
+    jobs[job_id]["result"] = result
+
+@app.post("/sexy_api/gate")
+async def start_scan(url: HttpUrl, background_tasks: BackgroundTasks):
+    job_id = str(uuid4())
+    jobs[job_id] = {"status": "pending", "result": None}
+    background_tasks.add_task(background_scan, str(url), job_id)
+    return {"job_id": job_id, "message": "Scan started"}
+
+@app.get("/sexy_api/results/{job_id}")
+async def get_scan_result(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job ID not found")
+    if jobs[job_id]["status"] != "done":
+        return {"status": "pending"}
+    return {"status": "done", "result": jobs[job_id]["result"]}
