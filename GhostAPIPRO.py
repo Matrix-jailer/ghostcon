@@ -1,6 +1,12 @@
 import os
 import time
 import re
+import selenium
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException
+from seleniumwire import webdriver
+import tldextract
 import threading
 from uuid import uuid4
 from urllib.parse import urlparse, urljoin
@@ -10,19 +16,13 @@ from multiprocessing import Manager, Pool
 import hashlib
 import random
 import logging
-
 from fastapi import FastAPI, HTTPException
 from pydantic import HttpUrl
-
 from bs4 import BeautifulSoup
 import requests  # for check_url_status if still used
 
-import selenium
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import WebDriverException
 
-import tldextract
+
 
 # Your other imports (re, etc.) based on your full script
 
@@ -30,6 +30,82 @@ import tldextract
 # Configure logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+
+
+
+def scan_website_v2(url, max_depth=2):
+    visited = []
+    content_hashes = []
+    detected_gateways = []
+
+    detected_gateways_set = set()
+    detected_3d = set()
+    detected_captcha = set()
+    detected_platforms = set()
+    cf_detected = False
+    detected_cards = set()
+    graphql_detected = "False"
+
+    base_domain = urlparse(url).netloc
+
+    def process(html, page_url):
+        nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
+        gw_set, tds, captcha, platforms, cf, cards, gql = detect_features(html, page_url, detected_gateways)
+        detected_gateways_set |= gw_set
+        detected_3d |= tds
+        detected_captcha |= captcha
+        detected_platforms |= platforms
+        detected_cards |= cards
+        if cf: cf_detected = True
+        if gql == "True": graphql_detected = "True"
+
+    def crawl_and_scrape():
+        args = (url, max_depth, visited, content_hashes, base_domain, detected_gateways)
+        results = crawl_worker(args)
+        for html, page_url in results:
+            process(html, page_url)
+
+    def crawl_and_network():
+        driver = create_selenium_wire_driver()
+        try:
+            driver.get(url)
+            time.sleep(5)
+            for req in driver.requests:
+                if req.response:
+                    body = (req.body or b"").decode("utf-8", errors="ignore")
+                    combined = (req.url + body).lower()
+                    process(combined, req.url)
+        except Exception as e:
+            print(f"[SeleniumWire] Error: {e}")
+        finally:
+            driver.quit()
+
+    t1 = threading.Thread(target=crawl_and_scrape)
+    t2 = threading.Thread(target=crawl_and_network)
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    ip = get_ip(base_domain)
+    country_name = get_country_from_tld_or_ip(url, ip)
+
+    return {
+        "url": url,
+        "payment_gateways": sorted(detected_gateways_set),
+        "3d_secure": sorted(detected_3d),
+        "captcha": sorted(detected_captcha),
+        "platforms": sorted(detected_platforms),
+        "cloudflare": cf_detected,
+        "graphql": graphql_detected,
+        "cards": sorted(detected_cards),
+        "country": country_name,
+        "ip": ip
+    }
+
 
 # Payment gateways
 PAYMENT_GATEWAYS = [
@@ -286,6 +362,26 @@ def create_selenium_driver():
     driver = webdriver.Chrome(options=options)
     driver.set_page_load_timeout(30)
     return driver
+
+def create_selenium_wire_driver():
+    from seleniumwire import webdriver
+    from selenium.webdriver.chrome.options import Options
+
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--window-size=1920,1080")
+
+    seleniumwire_options = {
+        'verify_ssl': False,
+        'timeout': 10,
+    }
+
+    return webdriver.Chrome(options=options, seleniumwire_options=seleniumwire_options)
+
 
 # Validate URL
 from urllib.parse import urlparse
@@ -640,6 +736,27 @@ async def get_scan_result(job_id: str):
 
 port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
+
+@app.get("/sexy_api/v2/gate")
+def scan_gateway_direct(url: HttpUrl):
+    """
+    NEW: Direct scan without background thread (Selenium-Wire powered)
+    """
+    try:
+        result = scan_website_v2(str(url))
+        return {"status": "done", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/sexy_api/results/{job_id}")
+async def get_scan_result(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job ID not found")
+    if jobs[job_id]["status"] != "done":
+        return {"status": "pending"}
+    return {"status": "done", "result": jobs[job_id]["result"]}
+
+port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 if __name__ == "__main__":
     import uvicorn
