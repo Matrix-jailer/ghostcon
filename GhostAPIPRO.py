@@ -2,10 +2,14 @@ import os
 import time
 import re
 import selenium
+import undetected_chromedriver as uc
 from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 from seleniumwire import webdriver
@@ -360,14 +364,25 @@ USER_AGENTS = [
 
 # Create cloudscraper instance
 def create_selenium_driver():
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")  # needed for some Linux envs like render
-    options.add_argument("--disable-dev-shm-usage")  # for Docker / limited memory environments
+    options = uc.ChromeOptions()
+    options.add_argument("--headless=new")  # Use new headless mode (more stealthy)
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-infobars")
     options.add_argument("--window-size=1920,1080")
-    driver = webdriver.Chrome(options=options)
-    driver.set_page_load_timeout(30)
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                         "AppleWebKit/537.36 (KHTML, like Gecko) "
+                         "Chrome/114.0.0.0 Safari/537.36")
+
+    driver = uc.Chrome(options=options, use_subprocess=True)
+
+    # Stealth tweaks
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    driver.execute_script("navigator.plugins = [1, 2, 3, 4]")
+    driver.execute_script("navigator.languages = ['en-US', 'en']")
+    driver.execute_script("navigator.platform = 'Win32'")
+
     return driver
 
 def create_selenium_wire_driver():
@@ -410,6 +425,14 @@ PAYMENT_GATEWAY = [
 ]
 
 
+import undetected_chromedriver as uc
+
+def create_selenium_driver():
+    options = uc.ChromeOptions()
+    options.headless = True
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    return uc.Chrome(options=options)
 
 
 from urllib.parse import urlparse
@@ -459,17 +482,33 @@ def fetch_url_selenium(url, timeout=15):
     try:
         driver = create_selenium_driver()
         driver.get(url)
-        # Wait until <body> tag is present or timeout
+
+        # Wait until <body> is present
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        page_source = driver.page_source
-        final_url = driver.current_url
-        return page_source, final_url
+
+        # Simulate human interaction
+        ActionChains(driver).move_by_offset(100, 100).perform()
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+
+        # Handle Cloudflare challenge if detected
+        if "Checking your browser" in driver.page_source or "cdn-cgi" in driver.current_url:
+            print("Cloudflare challenge detected. Waiting...")
+            time.sleep(8)
+            driver.refresh()
+            WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            time.sleep(2)
+
+        return driver.page_source, driver.current_url
+
     except (TimeoutException, WebDriverException) as e:
         print(f"Selenium error fetching {url}: {e}")
         return "", url
+
     finally:
         if driver:
             driver.quit()
+
 
 
 def extract_links_from_buttons_and_anchors(html, base_url):
