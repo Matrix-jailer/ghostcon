@@ -130,40 +130,40 @@ def scan_website_v2(url, max_depth=2):
             driver.get(url)
             time.sleep(2)
             driver.execute_script("""
-    window.__capturedFetches = [];
-    const originalFetch = window.fetch;
-    window.fetch = async function(...args) {
-        const response = await originalFetch(...args);
-        const clone = response.clone();
-        try {
-            const bodyText = await clone.text();
-            window.__capturedFetches.push({
-                url: args[0],
-                method: (args[1] && args[1].method) || 'GET',
-                body: (args[1] && args[1].body) || '',
-                response: bodyText
-            });
-        } catch (e) {}
-        return response;
-    };
-""")
-        time.sleep(4)
+            window.__capturedFetches = [];
+            const originalFetch = window.fetch;
+            window.fetch = async function(...args) {
+                const response = await originalFetch(...args);
+                const clone = response.clone();
+                try {
+                    const bodyText = await clone.text();
+                    window.__capturedFetches.push({
+                        url: args[0],
+                        method: (args[1] && args[1].method) || 'GET',
+                        body: (args[1] && args[1].body) || '',
+                        response: bodyText
+                    });
+                } catch (e) {}
+                return response;
+            };
+            """)
+            time.sleep(4)
 
-# Collect fetch logs after page settles
-try:
-    fetch_logs = driver.execute_script("return window.__capturedFetches || []")
-    for entry in fetch_logs:
-        combined = f"{entry['url']} {entry['body']} {entry['response']}".lower()
-        gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined, entry['url'], detected_gateways)
-        detected_gateways_set |= gw_set
-        detected_3d |= tds
-        detected_captcha |= cap
-        detected_platforms |= plat
-        detected_cards |= cards
-        if cf: cf_detected = True
-        if gql == "True": graphql_detected = "True"
-except Exception as fetch_error:
-    logger.info(f"[Fetch Hook Error] {fetch_error}")
+            # Collect fetch logs after page settles
+            try:
+                fetch_logs = driver.execute_script("return window.__capturedFetches || []")
+                for entry in fetch_logs:
+                    combined = f"{entry['url']} {entry['body']} {entry['response']}".lower()
+                    gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined, entry['url'], detected_gateways)
+                    detected_gateways_set |= gw_set
+                    detected_3d |= tds
+                    detected_captcha |= cap
+                    detected_platforms |= plat
+                    detected_cards |= cards
+                    if cf: cf_detected = True
+                    if gql == "True": graphql_detected = "True"
+            except Exception as fetch_error:
+                logger.info(f"[Fetch Hook Error] {fetch_error}")
 
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
@@ -179,7 +179,6 @@ except Exception as fetch_error:
                         time.sleep(3)  # Let it load checkout
             except Exception as click_err:
                 logger.info(f"[Click] No interactive buttons clicked: {click_err}")
-
 
             for req in driver.requests:
                 if not req.response:
@@ -197,8 +196,7 @@ except Exception as fetch_error:
                     "checkout.stripe.com" in combined_content or
                     ("pi_" in combined_content and "stripe" in combined_content)
                 ):
-
-    # Do your processing here
+                    # Do your processing here
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
@@ -259,7 +257,6 @@ except Exception as fetch_error:
         "country": country_name,
         "ip": ip
     }
-
 
 
 
