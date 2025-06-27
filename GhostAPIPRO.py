@@ -555,6 +555,10 @@ def detect_features(html_content, file_url, detected_gateways):
     gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
     matches = []
 
+for gateway in PAYMENT_GATEWAYS:
+    gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
+    matches = []
+
     for pattern in gateway_keywords:
         if pattern.search(content_lower):
             if gateway.lower() == "stripe" and "shopify" in file_url:
@@ -572,6 +576,7 @@ def detect_features(html_content, file_url, detected_gateways):
                 detected_3d.add(gateway.capitalize())
                 logger.info(f"3D Secure detected for {gateway} in {file_url}")
                 break
+
 
 
 
