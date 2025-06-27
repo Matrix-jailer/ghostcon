@@ -608,61 +608,66 @@ def detect_features(html_content, file_url, detected_gateways):
     content_lower = html_content.lower()
 
     # Payment gateways
-    for gateway in PAYMENT_GATEWAYS:
-        gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
+    for gateway, patterns in GATEWAY_KEYWORDS.items():
         matches = []
 
-        for pattern in gateway_keywords:
+        for pattern in patterns:
             if pattern.search(content_lower):
                 if gateway.lower() == "stripe" and "shopify" in file_url:
                     continue
                 matches.append(pattern.pattern)
                 logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
 
-        # Accept if 2+ matches or strong unique ones
-        if (len(matches) >= 2 or any(p in matches for p in ['pi_', 'client_secret', 'checkout.stripe.com'])) and gateway.capitalize() not in detected_gateways:
-            detected_gateways_set.add(gateway.capitalize())
-            detected_gateways.append(gateway.capitalize())
+        gateway_name = gateway.capitalize()
+        already_detected = gateway_name in detected_gateways
 
-            for tds_pattern in THREE_D_SECURE_KEYWORDS:
-                if tds_pattern.search(content_lower):
-                    detected_3d.add(gateway.capitalize())
-                    logger.info(f"3D Secure detected for {gateway} in {file_url}")
-                    break
+        strong_signals = any(p in matches for p in ['pi_', 'client_secret', 'checkout.stripe.com'])
 
-    # Captchas
-    for category, patterns in CAPTCHA_PATTERNS.items():
-        if any(re.search(pattern, content_lower, re.IGNORECASE) for pattern in patterns):
-            detected_captcha.add(f"{category} Found 🔒")
+        if (len(matches) >= 2 or strong_signals) and not already_detected:
+            detected_gateways_set.add(gateway_name)
+            detected_gateways.append(gateway_name)
+        elif len(matches) > 0 and not already_detected:
+            low_cred = f"{gateway_name} ⚠️ Low Credibility"
+            detected_gateways_set.add(low_cred)
+            detected_gateways.append(low_cred)
 
-    # Platforms
-    for keyword, name in PLATFORM_KEYWORDS.items():
-        if keyword in content_lower:
-            detected_platforms.add(name)
+        for tds_pattern in THREE_D_SECURE_KEYWORDS:
+            if tds_pattern.search(content_lower):
+                detected_3d.add(gateway_name)
+                logger.info(f"3D Secure detected for {gateway} in {file_url}")
+                break
 
-    # Cards
-    for card_pattern in CARD_KEYWORDS:
-        if card_pattern.search(content_lower):
-            card_name = card_pattern.pattern.lstrip(r'\b').rstrip(r'\b').capitalize()
-            detected_cards.add(card_name)
+    # Captcha detection
+    for pattern in CAPTCHA_KEYWORDS:
+        if pattern.search(content_lower):
+            detected_captcha.add("Captcha Found 🔒")
+            if "recaptcha" in pattern.pattern:
+                detected_captcha.add("reCaptcha Found 🔒")
+            break
 
-    # Cloudflare
-    cloudflare_identifiers = ['cloudflare', 'cf-ray', 'cf-chl-bypass']
-    if any(identifier in content_lower for identifier in cloudflare_identifiers):
-        cf_detected = True
+    # Platform detection
+    for name, platform_keywords in PLATFORM_KEYWORDS.items():
+        for pattern in platform_keywords:
+            if pattern.search(content_lower):
+                detected_platforms.add(name)
+                break
+
+    # Card detection
+    for name, card_keywords in CARD_BRANDS.items():
+        for pattern in card_keywords:
+            if pattern.search(content_lower):
+                detected_cards.add(name)
+                break
 
     # GraphQL
-    graphql_detected = "True" if "graphql" in content_lower else "False"
+    graphql_detected = "True" if "graphql" in content_lower or "/graphql" in content_lower else "False"
 
-    return (
-        detected_gateways_set,
-        detected_3d,
-        detected_captcha,
-        detected_platforms,
-        cf_detected,
-        detected_cards,
-        graphql_detected
-    )
+    # Cloudflare
+    if "cf-ray" in content_lower or "cloudflare" in content_lower:
+        cf_detected = True
+
+    return detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
+
 
 
 # Crawl worker
