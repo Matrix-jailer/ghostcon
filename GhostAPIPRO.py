@@ -631,10 +631,10 @@ def detect_features(html_content, file_url, detected_gateways):
             detected_gateways.append(low_cred)
 
         for tds_pattern in THREE_D_SECURE_KEYWORDS:
-            if tds_pattern.search(content_lower):
-                detected_3d.add(gateway_name)
-                logger.info(f"3D Secure detected for {gateway} in {file_url}")
-                break
+                if tds_pattern.search(content_lower):
+                    detected_3d.add(gateway.capitalize())
+                    logger.info(f"3D Secure detected for {gateway} in {file_url}")
+                    break
 
 
     # Captchas
