@@ -130,6 +130,7 @@ def scan_website_v2(url, max_depth=2):
             driver.get(url)
             time.sleep(2)
 
+
             # 👇 Add scroll to bottom (optional lazy load trigger)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
@@ -153,8 +154,6 @@ def scan_website_v2(url, max_depth=2):
                 url = req.url.lower()
                 if any(bad in url for bad in ignore_if_url_contains):
                     continue  # Skip non-relevant URLs early
-    
-                      # Skip non-relevant URLs early
                 body = (req.body or b"").decode("utf-8", errors="ignore")
                 combined_content = (url + " " + body).lower()
 
