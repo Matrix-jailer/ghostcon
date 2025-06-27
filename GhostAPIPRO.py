@@ -67,6 +67,11 @@ network_payment_url_keywords = [
 ignore_if_url_contains = [
     # Common asset/content folders
     "wp-content", "wp-includes", "skin/frontend", "/assets/", "/themes/", "/static/", "/media/", "/images/", "/img/",
+
+    "https://facebook.com", "https://googlemanager.com", "https://static.klaviyo.com", "static.klaviyo.com", "https://content-autofill.googleapis.com",
+    "content-autofill.googleapis.com", "https://www.google.com", "https://googleads.g.doubleclick.net", "googleads.g.doubleclick.net", "googleads.g.doubleclick.net",
+    "https://www.googletagmanager.com", "googletagmanager.com", "https://www.googleadservices.com", "googleadservices.com", "https://fonts.googleapis.com",
+    "fonts.googleapis.com", "http://clients2.google.com", "clients2.google.com", "https://analytics.google.com", "hanalytics.google.com",
     
     # Analytics & marketing scripts
     "googleapis", "gstatic", "googletagmanager", "google-analytics", "analytics", "doubleclick.net", 
@@ -80,7 +85,7 @@ ignore_if_url_contains = [
     "jsdelivr.net", "unpkg.com", "yastatic.net", "akamai", "fastly", 
     
     # Media, tracking images
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", 
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".ico", 
     
     # Useless scripts/styles
     ".css", ".scss", ".less", ".map", ".js", "main.js", "bundle.js", "common.js", "theme.js", "style.css", "custom.css",
@@ -194,7 +199,7 @@ def scan_website_v2(url, max_depth=2):
                     "client_secret" in combined_content or
                     "publishable_key" in combined_content or
                     "checkout.stripe.com" in combined_content or
-                    ("pi_" in combined_content and "stripe" in combined_content)
+                    ("js.stripe.com" in combined_content and "stripe" in combined_content)
                 ):
                     # Do your processing here
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
@@ -344,7 +349,7 @@ THREE_D_SECURE_KEYWORDS = [re.compile(pattern, re.IGNORECASE) for pattern in [
 GATEWAY_KEYWORDS = {
     "stripe": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'stripe\.com', r'api\.stripe\.com/v1', r'js\.stripe\.com', r'stripe\.js', r'stripe\.min\.js',
-        r'client_secret', r'pi_', r'payment_intent', r'data-stripe', r'stripe-payment-element',
+        r'client_secret', r'payment_intent', r'data-stripe', r'stripe-payment-element',
         r'stripe-elements', r'stripe-checkout', r'hooks\.stripe\.com', r'm\.stripe\.network',
         r'stripe__input', r'stripe-card-element', r'stripe-v3ds', r'confirmCardPayment',
         r'createPaymentMethod', r'stripePublicKey', r'stripe\.handleCardAction',
@@ -481,9 +486,9 @@ PAYMENT_INDICATOR_REGEX = [
         "secure-payment", "pay-securely", "shop-secure", "give", "donate-now", "donatenow",
         "donate_now", "get-now", "browse", "category", "items", "product", "item",
         "giftcard", "topup", "plans", "buynow", "sell", "sell-now", "purchase-now",
-        "shopnow", "shopping", "menu", "games", "accessories", "men", "women",
-        "collections", "sale", "vps", "server", "about", "about-us", "shirt", "pant",
-        "hoodie", "keys", "cart-items", "buy-secure", "cart-page", "basket", "checkout-page",
+        "shopnow", "shopping", "menu", "games",
+        "sale", "vps", "server", "about", "about-us",
+        "cart-items", "buy-secure", "cart-page", "checkout-page",
         "order-summary", "payment-form", "purchase-flow", "shop-cart", "ecommerce", "store-cart",
         "buy-button", "purchase-button", "add-item", "remove-item", "cart-update",
         "apply-coupon", "redeem-code", "discount-code", "promo-code", "gift-card", "pay-with",
@@ -492,10 +497,10 @@ PAYMENT_INDICATOR_REGEX = [
 ]
 
 # Non-HTML extensions
-NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf'}
+NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf', '.icon', '.img'}
 
 # Skip domains
-SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com'}
+SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com', 'https://facebook.com', 'https://googlemanager.com', 'https://static.klaviyo.com', 'static.klaviyo.com', 'https://content-autofill.googleapis.com', 'content-autofill.googleapis.com', 'https://www.google.com', 'https://googleads.g.doubleclick.net', 'googleads.g.doubleclick.net', 'googleads.g.doubleclick.net', 'https://www.googletagmanager.com', 'googletagmanager.com', 'https://www.googleadservices.com', 'googleadservices.com', 'https://fonts.googleapis.com', 'fonts.googleapis.com', 'http://clients2.google.com', 'clients2.google.com', 'https://analytics.google.com', 'hanalytics.google.com'}
 
 # User-Agent strings
 USER_AGENTS = [
