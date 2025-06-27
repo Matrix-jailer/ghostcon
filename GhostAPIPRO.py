@@ -156,7 +156,7 @@ def scan_website_v2(url, max_depth=2):
     
                       # Skip non-relevant URLs early
                 body = (req.body or b"").decode("utf-8", errors="ignore")
-                combined_content = (req_url + " " + body).lower()
+                combined_content = (url + " " + body).lower()
 
                 # Match logic (unchanged)
                 if (
