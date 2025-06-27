@@ -634,8 +634,8 @@ def detect_features(html_content, file_url, detected_gateways):
         gateway_name = gateway.replace(" ⚠️ Low Credibility", "")
         for tds_pattern in THREE_D_SECURE_KEYWORDS:
             if tds_pattern.search(content_lower):
-                detected_3d.add(gateway_name)
-                logger.info(f"3D Secure detected for {gateway_name} in {file_url}")
+                detected_3d.add(gateway.capitalize())
+                logger.info(f"3D Secure detected for {gateway} in {file_url}")
                 break
 
 
