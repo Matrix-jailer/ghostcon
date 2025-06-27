@@ -588,6 +588,7 @@ for gateway in PAYMENT_GATEWAYS:
             detected_platforms.add(name)
 
     # Cards
+    
     for card_pattern in CARD_KEYWORDS:
         if card_pattern.search(content_lower):
             card_name = card_pattern.pattern.lstrip(r'\b').rstrip(r'\b').capitalize()
@@ -598,10 +599,20 @@ for gateway in PAYMENT_GATEWAYS:
     if any(identifier in content_lower for identifier in cloudflare_identifiers):
         cf_detected = True
 
+
     # GraphQL
     graphql_detected = "True" if "graphql" in content_lower else "False"
+    
+    return (
+        detected_gateways_set,
+        detected_3d,
+        detected_captcha,
+        detected_platforms,
+        cf_detected,
+        detected_cards,
+        graphql_detected
+    )
 
-    return detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
 
 # Crawl worker
 def crawl_worker(args):
