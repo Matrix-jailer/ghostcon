@@ -550,10 +550,7 @@ def detect_features(html_content, file_url, detected_gateways):
     content_lower = html_content.lower()
 
     # Payment gateways
-    # Payment gateways
-    for gateway in PAYMENT_GATEWAYS:
-    gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
-    matches = []
+
 
 for gateway in PAYMENT_GATEWAYS:
     gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
