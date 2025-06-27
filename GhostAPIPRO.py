@@ -122,16 +122,15 @@ def scan_website_v2(url, max_depth=2):
             except Exception as click_err:
                 logger.info(f"[Click] No interactive buttons clicked: {click_err}")
 
-            # 👇 Begin scanning captured network requests
+
             for req in driver.requests:
                 if not req.response:
                     continue
-                url = req.url.lower()
-                if any(bad in url for bad in ignore_if_url_contains):
+                req_url = req.url.lower()
+                if any(bad in req_url for bad in ignore_if_url_contains):
                     continue  # Skip non-relevant URLs early
-                
                 body = (req.body or b"").decode("utf-8", errors="ignore")
-                combined_content = (req.url + " " + body).lower()
+                combined_content = (req_url + " " + body).lower()
 
                 # Match logic (unchanged)
                 if any(kw in combined_content for kw in ["pi_", "client_secret", "publishable_key", "checkout.stripe.com"]):
