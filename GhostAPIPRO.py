@@ -147,7 +147,7 @@ def scan_website_v2(url, max_depth=2):
         return response;
     };
 """)
-time.sleep(4)  # Give page time to trigger fetches
+        time.sleep(4)
 
 # Collect fetch logs after page settles
 try:
