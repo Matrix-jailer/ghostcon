@@ -287,8 +287,8 @@ GATEWAY_KEYWORDS = {
         r'elements\.create', r'js\.stripe\.com/v3/hcaptcha-invisible', r'js\.stripe\.com/v3',
         r'stripe\.createToken', r'stripe-payment-request', r'stripe__frame',
         r'api\.stripe\.com/v1/payment_methods', r'js\.stripe\.com', r'api\.stripe\.com/v1/tokens',
-        r'stripe\.com/docs', r'checkout\.stripe\.com', r'stripe-js', r'payment-method', r'stripe-redirect',
-        r'stripe-payment', r'stripe\.network', r'stripe-checkout\.js', r'payment-element'
+        r'stripe\.com/docs', r'checkout\.stripe\.com', r'stripe-js', r'stripe-redirect',
+        r'stripe-payment', r'stripe\.network', r'stripe-checkout\.js'
     ]],
     "paypal": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'api\.paypal\.com', r'paypal\.com', r'paypal-sdk\.com', r'paypal\.js', r'paypalobjects\.com', r'paypal_express_checkout', r'e\.PAYPAL_EXPRESS_CHECKOUT',
