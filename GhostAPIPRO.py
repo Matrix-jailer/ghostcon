@@ -552,28 +552,27 @@ def detect_features(html_content, file_url, detected_gateways):
     # Payment gateways
     # Payment gateways
     for gateway in PAYMENT_GATEWAYS:
-        gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
-        matched_count = 0
+    gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
+    matches = []
 
-        for pattern in gateway_keywords:
-            if pattern.search(content_lower):
-                # Prevent Stripe false positives on Shopify-hosted URLs
-                if gateway.lower() == "stripe" and "shopify" in file_url:
-                    continue
-                matched_count += 1
-                logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
+    for pattern in gateway_keywords:
+        if pattern.search(content_lower):
+            if gateway.lower() == "stripe" and "shopify" in file_url:
+                continue
+            matches.append(pattern.pattern)
+            logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
 
-        # Accept only if 2+ matches
-        if matched_count >= 2 and gateway.capitalize() not in detected_gateways:
-            detected_gateways_set.add(gateway.capitalize())
-            detected_gateways.append(gateway.capitalize())
+    # Accept if 2+ matches, or 1 match if it's a highly unique pattern
+    if (len(matches) >= 2 or any(p in matches for p in ['pi_', 'client_secret', 'checkout.stripe.com'])) and gateway.capitalize() not in detected_gateways:
+        detected_gateways_set.add(gateway.capitalize())
+        detected_gateways.append(gateway.capitalize())
 
-            # Now safely detect 3D Secure for valid gateways
-            for tds_pattern in THREE_D_SECURE_KEYWORDS:
-                if tds_pattern.search(content_lower):
-                    detected_3d.add(gateway.capitalize())
-                    logger.info(f"3D Secure detected for {gateway} in {file_url}")
-                    break
+        for tds_pattern in THREE_D_SECURE_KEYWORDS:
+            if tds_pattern.search(content_lower):
+                detected_3d.add(gateway.capitalize())
+                logger.info(f"3D Secure detected for {gateway} in {file_url}")
+                break
+
 
 
     # Captchas
