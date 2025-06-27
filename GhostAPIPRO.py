@@ -536,10 +536,10 @@ def get_all_sources(url, html, base_domain):
 
 
 
-# Detect features
 def detect_features(html_content, file_url, detected_gateways):
     if not html_content or not html_content.strip():
         return set(), set(), set(), set(), False, set(), "False"
+
     detected_gateways_set = set()
     detected_3d = set()
     detected_captcha = set()
@@ -550,32 +550,27 @@ def detect_features(html_content, file_url, detected_gateways):
     content_lower = html_content.lower()
 
     # Payment gateways
+    for gateway in PAYMENT_GATEWAYS:
+        gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
+        matches = []
 
+        for pattern in gateway_keywords:
+            if pattern.search(content_lower):
+                if gateway.lower() == "stripe" and "shopify" in file_url:
+                    continue
+                matches.append(pattern.pattern)
+                logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
 
-for gateway in PAYMENT_GATEWAYS:
-    gateway_keywords = GATEWAY_KEYWORDS.get(gateway, [])
-    matches = []
+        # Accept if 2+ matches or strong unique ones
+        if (len(matches) >= 2 or any(p in matches for p in ['pi_', 'client_secret', 'checkout.stripe.com'])) and gateway.capitalize() not in detected_gateways:
+            detected_gateways_set.add(gateway.capitalize())
+            detected_gateways.append(gateway.capitalize())
 
-    for pattern in gateway_keywords:
-        if pattern.search(content_lower):
-            if gateway.lower() == "stripe" and "shopify" in file_url:
-                continue
-            matches.append(pattern.pattern)
-            logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
-
-    # Accept if 2+ matches, or 1 match if it's a highly unique pattern
-    if (len(matches) >= 2 or any(p in matches for p in ['pi_', 'client_secret', 'checkout.stripe.com'])) and gateway.capitalize() not in detected_gateways:
-        detected_gateways_set.add(gateway.capitalize())
-        detected_gateways.append(gateway.capitalize())
-
-        for tds_pattern in THREE_D_SECURE_KEYWORDS:
-            if tds_pattern.search(content_lower):
-                detected_3d.add(gateway.capitalize())
-                logger.info(f"3D Secure detected for {gateway} in {file_url}")
-                break
-
-
-
+            for tds_pattern in THREE_D_SECURE_KEYWORDS:
+                if tds_pattern.search(content_lower):
+                    detected_3d.add(gateway.capitalize())
+                    logger.info(f"3D Secure detected for {gateway} in {file_url}")
+                    break
 
     # Captchas
     for category, patterns in CAPTCHA_PATTERNS.items():
@@ -588,7 +583,6 @@ for gateway in PAYMENT_GATEWAYS:
             detected_platforms.add(name)
 
     # Cards
-    
     for card_pattern in CARD_KEYWORDS:
         if card_pattern.search(content_lower):
             card_name = card_pattern.pattern.lstrip(r'\b').rstrip(r'\b').capitalize()
@@ -599,10 +593,9 @@ for gateway in PAYMENT_GATEWAYS:
     if any(identifier in content_lower for identifier in cloudflare_identifiers):
         cf_detected = True
 
-
     # GraphQL
     graphql_detected = "True" if "graphql" in content_lower else "False"
-    
+
     return (
         detected_gateways_set,
         detected_3d,
