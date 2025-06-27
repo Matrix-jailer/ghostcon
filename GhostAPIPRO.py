@@ -72,7 +72,7 @@ def scan_website_v2(url, max_depth=2):
         for html, page_url in results:
             process(html, page_url)
 
-   def crawl_and_network():
+def crawl_and_network():
     driver = create_selenium_wire_driver()
     try:
         driver.get(url)
