@@ -126,7 +126,10 @@ def scan_website_v2(url, max_depth=2):
             for req in driver.requests:
                 if not req.response:
                     continue
-
+                url = req.url.lower()
+                if any(bad in url for bad in ignore_if_url_contains):
+                    continue  # Skip non-relevant URLs early
+                
                 body = (req.body or b"").decode("utf-8", errors="ignore")
                 combined_content = (req.url + " " + body).lower()
 
