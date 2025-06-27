@@ -610,31 +610,37 @@ def detect_features(html_content, file_url, detected_gateways):
     # Payment gateways
     for gateway, patterns in GATEWAY_KEYWORDS.items():
         matches = []
-
         for pattern in patterns:
             if pattern.search(content_lower):
+                # Skip Stripe false positives on Shopify
                 if gateway.lower() == "stripe" and "shopify" in file_url:
                     continue
                 matches.append(pattern.pattern)
                 logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
 
+        if not matches:
+            continue
+
         gateway_name = gateway.capitalize()
-        already_detected = gateway_name in detected_gateways
+        already_detected = any(gateway_name in g for g in detected_gateways)  # allows low credibility duplicates
 
         strong_signals = any(p in matches for p in ['pi_', 'client_secret', 'checkout.stripe.com'])
 
-        if (len(matches) >= 2 or strong_signals) and not already_detected:
-            detected_gateways_set.add(gateway_name)
-            detected_gateways.append(gateway_name)
-        elif len(matches) > 0 and not already_detected:
+        if (len(matches) >= 2 or strong_signals):
+            if not already_detected:
+                detected_gateways_set.add(gateway_name)
+                detected_gateways.append(gateway_name)
+        else:
             low_cred = f"{gateway_name} ⚠️ Low Credibility"
-            detected_gateways_set.add(low_cred)
-            detected_gateways.append(low_cred)
+            if not already_detected:
+                detected_gateways_set.add(low_cred)
+                detected_gateways.append(low_cred)
 
+        # Only look for 3D Secure if any match exists
         for tds_pattern in THREE_D_SECURE_KEYWORDS:
             if tds_pattern.search(content_lower):
                 detected_3d.add(gateway_name)
-                logger.info(f"3D Secure detected for {gateway} in {file_url}")
+                logger.info(f"3D Secure detected for {gateway_name} in {file_url}")
                 break
 
     # Captcha detection
@@ -659,14 +665,15 @@ def detect_features(html_content, file_url, detected_gateways):
                 detected_cards.add(name)
                 break
 
-    # GraphQL
+    # GraphQL detection
     graphql_detected = "True" if "graphql" in content_lower or "/graphql" in content_lower else "False"
 
-    # Cloudflare
+    # Cloudflare detection
     if "cf-ray" in content_lower or "cloudflare" in content_lower:
         cf_detected = True
 
     return detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
+
 
 
 
