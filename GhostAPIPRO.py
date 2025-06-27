@@ -159,7 +159,13 @@ def scan_website_v2(url, max_depth=2):
                 combined_content = (req_url + " " + body).lower()
 
                 # Match logic (unchanged)
-                if any(kw in combined_content for kw in ["pi_", "client_secret", "publishable_key", "checkout.stripe.com"]):
+                if (
+                    re.search(r'\bpi_[a-zA-Z0-9]*\b', combined_content) or
+                    "client_secret" in combined_content or
+                    "publishable_key" in combined_content or
+                    "checkout.stripe.com" in combined_content
+                ):
+    # Do your processing here
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
