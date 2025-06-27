@@ -64,6 +64,30 @@ network_payment_url_keywords = [
     "/complete",  # e.g., /payment/complete
 ]
 
+ignore_if_url_contains = [
+    # Common asset/content folders
+    "wp-content", "wp-includes", "skin/frontend", "/assets/", "/themes/", "/static/", "/media/", "/images/", "/img/",
+    
+    # Analytics & marketing scripts
+    "googleapis", "gstatic", "googletagmanager", "google-analytics", "analytics", "doubleclick.net", 
+    "facebook.net", "fbcdn", "pixel.", "tiktokcdn", "matomo", "segment.io", "clarity.ms", "mouseflow", "hotjar", 
+    
+    # Fonts, icons, visual only
+    "fonts.", "fontawesome", ".woff", ".woff2", ".ttf", ".eot", ".otf", ".ico", ".svg",
+    
+    # CDN & framework scripts
+    "cdn.jsdelivr.net", "cloudflareinsights.com", "cdnjs", "bootstrapcdn", "polyfill.io", 
+    "jsdelivr.net", "unpkg.com", "yastatic.net", "akamai", "fastly", 
+    
+    # Media, tracking images
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", 
+    
+    # Useless scripts/styles
+    ".css", ".scss", ".less", ".map", ".js", "main.js", "bundle.js", "common.js", "theme.js", "style.css", "custom.css",
+
+    # Other non-payment known paths
+    "/favicon", "/robots.txt", "/sitemap", "/manifest", "/rss", "/feed", "/help", "/support", "/about", "/terms", "/privacy",
+]
 
 
 
@@ -126,9 +150,11 @@ def scan_website_v2(url, max_depth=2):
             for req in driver.requests:
                 if not req.response:
                     continue
-                req_url = req.url.lower()
-                if any(bad in req_url for bad in ignore_if_url_contains):
+                url = req.url.lower()
+                if any(bad in url for bad in ignore_if_url_contains):
                     continue  # Skip non-relevant URLs early
+    
+                      # Skip non-relevant URLs early
                 body = (req.body or b"").decode("utf-8", errors="ignore")
                 combined_content = (req_url + " " + body).lower()
 
@@ -547,15 +573,61 @@ def fetch_url_selenium(url, timeout=15):
         driver.get(url)
         # Wait until <body> tag is present or timeout
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        page_source = driver.page_source
+        html_chunks = extract_deep_html(driver)
+        combined_html = "\n".join(html_chunks)
         final_url = driver.current_url
-        return page_source, final_url
+        final_url = driver.current_url
+        return combined_html, final_url
     except (TimeoutException, WebDriverException) as e:
         print(f"Selenium error fetching {url}: {e}")
         return "", url
     finally:
         if driver:
             driver.quit()
+
+def extract_deep_html(driver):
+    html_chunks = []
+
+    # Add main page HTML
+    try:
+        html_chunks.append(driver.page_source)
+    except Exception as e:
+        logger.warning(f"[Deep HTML] Failed to get main page HTML: {e}")
+
+    # Extract iframe content
+    try:
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for i, iframe in enumerate(iframes):
+            try:
+                driver.switch_to.frame(iframe)
+                html_chunks.append(driver.page_source)
+                driver.switch_to.default_content()
+            except Exception as e:
+                logger.info(f"[Deep HTML] Failed to access iframe #{i}: {e}")
+                driver.switch_to.default_content()
+    except Exception as e:
+        logger.warning(f"[Deep HTML] Error iterating iframes: {e}")
+
+    # Shadow DOMs (basic attempt)
+    try:
+        shadow_roots = driver.execute_script("""
+            let shadows = [];
+            function deepSearch(el) {
+                if (!el || !el.shadowRoot) return;
+                shadows.push(el.shadowRoot.innerHTML);
+                el.shadowRoot.querySelectorAll('*').forEach(deepSearch);
+            }
+            document.querySelectorAll('*').forEach(el => {
+                if (el.shadowRoot) deepSearch(el);
+            });
+            return shadows;
+        """)
+        html_chunks.extend(shadow_roots or [])
+    except Exception as e:
+        logger.warning(f"[Deep HTML] Failed to read Shadow DOMs: {e}")
+
+    return html_chunks
+    
 
 
 def extract_links_from_buttons_and_anchors(html, base_url):
