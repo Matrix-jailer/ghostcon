@@ -37,6 +37,32 @@ import requests  # for check_url_status if still used
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+network_payment_url_keywords = [
+    "/checkout",
+    "/payment",
+    "/pay",
+    "/setup_intent",
+    "/authorize_payment",
+    "/intent",
+    "/confirm"
+    "/charge",
+    "/authorize",
+    "/submit_payment",
+    "/create_order",
+    "/payment_intent",
+    "/process_payment",
+    "/transaction",
+    "/confirm_payment",
+    "/capture",
+    "/payment-method",
+    "/billing",
+    "/invoice",
+    "/order/submit",
+    "/tokenize",
+    "/session",  # common in Stripe and Shopify
+    "/execute-payment",
+    "/complete",  # e.g., /payment/complete
+]
 
 
 
@@ -127,7 +153,7 @@ def scan_website_v2(url, max_depth=2):
                     if cf: cf_detected = True
                     if gql == "True": graphql_detected = "True"
 
-                elif any(p in req.url.lower() for p in ["/checkout", "/payment", "/charge", "/authorize"]):
+                elif any(p in req.url.lower() for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
