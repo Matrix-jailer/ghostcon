@@ -72,44 +72,60 @@ def scan_website_v2(url, max_depth=2):
         for html, page_url in results:
             process(html, page_url)
 
-    def crawl_and_network():
-        driver = create_selenium_wire_driver()
-        try:
-            driver.get(url)
-            time.sleep(5)
-            for req in driver.requests:
-                if req.response:
-                    body = (req.body or b"").decode("utf-8", errors="ignore")
-                    combined = (req.url + body).lower()
-                    process(combined, req.url)
-        except Exception as e:
-            print(f"[SeleniumWire] Error: {e}")
-        finally:
-            driver.quit()
+   def crawl_and_network():
+    driver = create_selenium_wire_driver()
+    try:
+        driver.get(url)
+        time.sleep(5)
 
-    t1 = threading.Thread(target=crawl_and_scrape)
-    t2 = threading.Thread(target=crawl_and_network)
+        for req in driver.requests:
+            if not req.response:
+                continue
 
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+            # Combine request URL and body
+            body = (req.body or b"").decode("utf-8", errors="ignore")
+            combined_content = (req.url + " " + body).lower()
 
-    ip = get_ip(base_domain)
-    country_name = get_country_from_tld_or_ip(url, ip)
+            # High-confidence network-based gateway detection
+            if any(kw in combined_content for kw in ["pi_", "client_secret", "publishable_key", "checkout.stripe.com"]):
+                logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
+                gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
+                detected_gateways_set |= gw_set
+                detected_3d |= tds
+                detected_captcha |= cap
+                detected_platforms |= plat
+                detected_cards |= cards
+                if cf: cf_detected = True
+                if gql == "True": graphql_detected = "True"
 
-    return {
-        "url": url,
-        "payment_gateways": sorted(detected_gateways_set),
-        "3d_secure": sorted(detected_3d),
-        "captcha": sorted(detected_captcha),
-        "platforms": sorted(detected_platforms),
-        "cloudflare": cf_detected,
-        "graphql": graphql_detected,
-        "cards": sorted(detected_cards),
-        "country": country_name,
-        "ip": ip
-    }
+            elif "paypal.com/sdk/js" in combined_content or "paypal" in req.url:
+                logger.info(f"[Net Gateway Match] PAYPAL-like signal in {req.url}")
+                gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
+                detected_gateways_set |= gw_set
+                detected_3d |= tds
+                detected_captcha |= cap
+                detected_platforms |= plat
+                detected_cards |= cards
+                if cf: cf_detected = True
+                if gql == "True": graphql_detected = "True"
+
+            # Optional: other heuristic endpoints
+            elif any(p in req.url.lower() for p in ["/checkout", "/payment", "/charge", "/authorize"]):
+                logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
+                gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
+                detected_gateways_set |= gw_set
+                detected_3d |= tds
+                detected_captcha |= cap
+                detected_platforms |= plat
+                detected_cards |= cards
+                if cf: cf_detected = True
+                if gql == "True": graphql_detected = "True"
+
+    except Exception as e:
+        print(f"[SeleniumWire Error] {e}")
+    finally:
+        driver.quit()
+
 
 
 # Payment gateways
