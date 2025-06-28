@@ -4,8 +4,7 @@ import re
 import selenium
 import undetected_chromedriver as uc # Use v2 for better control
 from seleniumwire import webdriver
-from webdriver_manager.chrome
-import ChromeDriverManager
+from webdriver_manager.chrome import ChromeDriverManager
 from typing import Optional
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
