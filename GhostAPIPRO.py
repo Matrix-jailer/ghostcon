@@ -657,7 +657,7 @@ def is_valid_url(url, base_domain):
 
 # Check URL status
 def check_url_status_selenium(url):
-    driver = create_selenium_driver()
+    driver = create_selenium_wire_driver()
     try:
         driver.set_page_load_timeout(10)
         driver.get(url)
@@ -672,7 +672,7 @@ def check_url_status_selenium(url):
 def fetch_url_selenium(url, timeout=15):
     driver = None
     try:
-        driver = create_selenium_driver()
+        driver = create_selenium_wire_driver()
         driver.get(url)
         # Wait until <body> tag is present or timeout
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
