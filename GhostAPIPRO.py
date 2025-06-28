@@ -585,45 +585,45 @@ def create_selenium_wire_driver():
         'verify_ssl': False,
         'enable_har': True,
         'request_storage_base_dir': '/tmp/seleniumwire-storage',
-        'timeout': 10
+        'timeout': 10,
+        'port': random.randint(49152, 65535)  # Use random high port to avoid conflicts
     }
 
-    try:
-        logger.info("[UDC] Initializing undetected-chromedriver with SeleniumWire")
-        with temp_chromedriver() as temp_driver_path:
-            driver = uc.Chrome(
-                options=options,
-                headless=True,
-                driver_executable_path=temp_driver_path,
-                version_main=138
-            )
-            # Initialize SeleniumWire with UDC's service
-            driver = webdriver.Chrome(
-                service=driver.service,
-                options=options,
-                seleniumwire_options=seleniumwire_options
-            )
-            # Apply stealth settings
-            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                "source": """
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    window.navigator.chrome = { runtime: {} };
-                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-                """
-            })
-            # Verify network capture
-            try:
-                driver.get("about:blank")
-                driver.requests  # Test network capture
-                logger.debug("[UDC] Network capture verified")
-            except Exception as e:
-                logger.warning(f"[UDC] Network capture test failed: {e}")
-            logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
-            return driver
-    except Exception as e:
-        logger.error(f"[UDC Init Error] Failed to create driver: {e}")
-        raise
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"[UDC] Initializing undetected-chromedriver with SeleniumWire (Attempt {attempt + 1}/{max_retries})")
+            with temp_chromedriver() as temp_driver_path:
+                driver = uc.Chrome(
+                    options=options,
+                    headless=True,
+                    driver_executable_path=temp_driver_path,
+                    version_main=138,
+                    seleniumwire_options=seleniumwire_options  # Pass SeleniumWire options directly
+                )
+                # Apply stealth settings
+                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": """
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                        window.navigator.chrome = { runtime: {} };
+                        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+                        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    """
+                })
+                # Verify network capture
+                try:
+                    driver.get("about:blank")
+                    driver.requests  # Test network capture
+                    logger.debug("[UDC] Network capture verified")
+                except Exception as e:
+                    logger.warning(f"[UDC] Network capture test failed: {e}")
+                logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
+                return driver
+        except Exception as e:
+            logger.error(f"[UDC Init Error] Failed to create driver on attempt {attempt + 1}: {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(1)  # Wait before retrying
 # Validate URL
 from urllib.parse import urlparse
 
@@ -687,7 +687,8 @@ def check_url_status_selenium(url):
     finally:
         driver.quit()
 
-# Fetch URL content
+
+
 def fetch_url_selenium(url, timeout=15):
     driver = None
     try:
@@ -707,7 +708,6 @@ def fetch_url_selenium(url, timeout=15):
                 driver.quit()
             except Exception as e:
                 logger.warning(f"[Selenium Quit Error] Failed to quit driver: {e}")
-
 
 
 def extract_deep_html(driver):
