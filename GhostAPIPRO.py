@@ -4,8 +4,9 @@ import re
 import selenium
 import undetected_chromedriver as uc # Use v2 for better control
 from seleniumwire import webdriver
+from webdriver_manager.chrome
+import ChromeDriverManager
 from typing import Optional
-from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -540,7 +541,7 @@ def create_selenium_driver():
 
 
 def create_selenium_wire_driver(headless=True):
-    options = ChromeOptions()
+    options = uc.ChromeOptions()
     if headless:
         options.add_argument("--headless")
     options.add_argument("--disable-blink-features=AutomationControlled")
