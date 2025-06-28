@@ -1,12 +1,12 @@
 fastapi
 undetected-chromedriver
 uvicorn[standard]
-webdriver.manager
 requests
 beautifulsoup4
 blinker==1.7.0
 selenium
-selenium-wire
+undetected-chromedriver>=3.5.5
+selenium-wire>=5.1.0
 tldextract
 lxml
 httpx
