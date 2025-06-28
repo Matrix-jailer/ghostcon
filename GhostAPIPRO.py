@@ -2,6 +2,8 @@ import os
 import time
 import re
 import selenium
+import undetected_chromedriver.v2 as uc  # Use v2 for better control
+from seleniumwire.undetected_chromedriver.v2 import Chrome, ChromeOptions
 from typing import Optional
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -536,24 +538,39 @@ def create_selenium_driver():
     driver.set_page_load_timeout(30)
     return driver
 
-def create_selenium_wire_driver():
-    from seleniumwire import webdriver
-    from selenium.webdriver.chrome.options import Options
 
-    options = Options()
-    options.add_argument("--headless")
+
+def create_selenium_wire_driver(headless=True):
+    options = ChromeOptions()
+    if headless:
+        options.add_argument("--headless")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-infobars")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--disable-extensions")
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-extensions")
 
     seleniumwire_options = {
         'verify_ssl': False,
-        'timeout': 10,
+        'disable_encoding': True,
+        'request_storage_base_dir': '/tmp/seleniumwire',
+        'request_storage': 'memory',
     }
 
-    return webdriver.Chrome(options=options, seleniumwire_options=seleniumwire_options)
+    try:
+        driver = Chrome(
+            options=options,
+            seleniumwire_options=seleniumwire_options,
+            use_subprocess=True,
+        )
+        driver.set_page_load_timeout(30)
+        return driver
+    except Exception as e:
+        logger.error(f"[UDC Error] Failed to initialize undetected-chromedriver: {e}")
+        raise
+
 
 
 # Validate URL
