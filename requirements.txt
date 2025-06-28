@@ -1,6 +1,7 @@
 fastapi
 undetected-chromedriver
 uvicorn[standard]
+webdriver.manager
 requests
 beautifulsoup4
 blinker==1.7.0
