@@ -1,4 +1,5 @@
 fastapi
+undetected-chromedriver
 uvicorn[standard]
 requests
 beautifulsoup4
