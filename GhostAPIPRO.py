@@ -2,8 +2,8 @@ import os
 import time
 import re
 import selenium
-import undetected_chromedriver.v2 as uc  # Use v2 for better control
-from seleniumwire.undetected_chromedriver.v2 import Chrome, ChromeOptions
+import undetected_chromedriver as uc # Use v2 for better control
+from seleniumwire import webdriver
 from typing import Optional
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -12,7 +12,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.common.exceptions import WebDriverException
-from seleniumwire import webdriver
 from urllib.parse import urljoin
 import tldextract
 import threading
