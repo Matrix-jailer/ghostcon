@@ -98,14 +98,6 @@ ignore_if_url_contains = [
 
 
 
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException, WebDriverException
-from urllib.parse import urlparse
-import threading
-import time
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +158,7 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 if "cloudflare" in html or "please wait" in html or "checking your browser" in html:
                     logger.info("[Debug] Cloudflare challenge detected, UDC should handle it")
                 raise TimeoutException(f"Page load failed for {url}")
-            
+
             if timeout and time.time() - start_time > timeout:
                 logger.info("[Timeout] Reached timeout limit, stopping scan early.")
                 return
@@ -296,7 +288,6 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         "country": country_name,
         "ip": ip
     }
-
 # Payment gateways
 PAYMENT_GATEWAYS = [
     "stripe", "paypal", "paytm", "razorpay", "square", "adyen", "braintree",
@@ -556,6 +547,7 @@ def create_selenium_driver():
     return driver
 
 
+
 logger = logging.getLogger(__name__)
 
 def create_selenium_wire_driver():
@@ -567,23 +559,22 @@ def create_selenium_wire_driver():
     options.add_argument("--disable-extensions")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    # Randomize user agent for better stealth
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+    # Randomize user agent for stealth
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
 
     seleniumwire_options = {
         'verify_ssl': False,
         'enable_har': True,
-        'request_storage_base_dir': './seleniumwire-storage',  # Adjustable for Render
+        'request_storage_base_dir': '/tmp/seleniumwire-storage',  # Render-compatible
         'timeout': 10
     }
 
     try:
         logger.info("[UDC] Initializing undetected-chromedriver with SeleniumWire")
-        # Initialize UDC
         driver = uc.Chrome(
             options=options,
             headless=True,
-            version_main=126  # Adjust to match your Chrome version
+            version_main=138  # Matches Chrome 138 from Dockerfile
         )
         # Patch UDC to support SeleniumWire
         from seleniumwire.webdriver import Chrome as WireChrome
