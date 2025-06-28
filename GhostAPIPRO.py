@@ -2,6 +2,7 @@ import os
 import time
 import re
 import selenium
+from typing import Optional
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -96,7 +97,8 @@ ignore_if_url_contains = [
 
 
 
-def scan_website_v2(url, max_depth=2):
+def scan_website_v2(url, max_depth=2, timeout=None):
+    start_time=time.time()
     visited = []
     content_hashes = []
     detected_gateways = []
@@ -123,9 +125,15 @@ def scan_website_v2(url, max_depth=2):
         if gql == "True": graphql_detected = "True"
 
     def crawl_and_scrape():
+        if timeout and time.time() - start_time > timeout:
+            logger.info("[Timeout] Reached timeout limit, stopping scan early.")
+            return
         args = (url, max_depth, visited, content_hashes, base_domain, detected_gateways)
         results = crawl_worker(args)
         for html, page_url in results:
+            if timeout and time.time() - start_time > timeout:
+                logger.info("[Timeout] Scraper loop exited early during processing.")
+                return
             process(html, page_url)
 
     def crawl_and_network():
@@ -138,6 +146,11 @@ def scan_website_v2(url, max_depth=2):
             driver.get(url)
             logger.info("[Debug] Page loaded successfully")
             time.sleep(2)
+            if timeout and time.time() - start_time > timeout:
+                logger.info("[Timeout] Reached timeout limit, stopping scan early.")
+                return
+
+            
             driver.execute_script("""
             window.__capturedFetches = [];
             const originalFetch = window.fetch;
@@ -1013,12 +1026,12 @@ port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 
 @app.get("/sexy_api/v2/gate")
-def scan_gateway_direct(url: HttpUrl):
+def scan_gateway_direct(url: HttpUrl, timeout: Optional[int] = None):
     """
     NEW: Direct scan without background thread (Selenium-Wire powered)
     """
     try:
-        result = scan_website_v2(str(url))
+        result = scan_website_v2(str(url), timeout=timeout)
         return {"status": "done", "result": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
