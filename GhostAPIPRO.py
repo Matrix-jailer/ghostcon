@@ -226,7 +226,7 @@ def scan_website_v2(url, max_depth=2):
                 elif any(p in req_url for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    detected_3d = tds
+                    detected_3d |= tds
                     detected_captcha |= cap
                     detected_platforms |= plat
                     detected_cards |= cards
@@ -260,10 +260,9 @@ def scan_website_v2(url, max_depth=2):
         "cloudflare": cf_detected,
         "graphql": graphql_detected,
         "cards": sorted(detected_cards),
-        "country": country_name{-\
+        "country": country_name,
         "ip": ip
     }
-
 
 
 # Payment gateways
