@@ -278,6 +278,20 @@ def scan_website_v2(url, max_depth=2, timeout=None):
     }
 
 
+def background_scan_v2(url: str, job_id: str, timeout: int = None):
+    try:
+        result = scan_website_v2(url, timeout=timeout)
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["result"] = result
+    except Exception as e:
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["result"] = {
+            "success": False,
+            "error": f"[v2 error] {str(e)}"
+        }
+
+
+
 # Payment gateways
 PAYMENT_GATEWAYS = [
     "stripe", "paypal", "paytm", "razorpay", "square", "adyen", "braintree",
@@ -1026,15 +1040,14 @@ port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 
 @app.get("/sexy_api/v2/gate")
-def scan_gateway_direct(url: HttpUrl, timeout: Optional[int] = None):
+async def start_scan_v2_get(url: HttpUrl, timeout: Optional[int] = None):
     """
-    NEW: Direct scan without background thread (Selenium-Wire powered)
+    Starts scan using GET for scan_website_v2 (background, threaded, returns job_id)
     """
-    try:
-        result = scan_website_v2(str(url), timeout=timeout)
-        return {"status": "done", "result": result}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    job_id = str(uuid4())
+    jobs[job_id] = {"status": "pending", "result": None}
+    threading.Thread(target=background_scan_v2, args=(str(url), job_id, timeout)).start()
+    return {"job_id": job_id, "message": "v2 Scan started"}
 
 @app.get("/sexy_api/results/{job_id}")
 async def get_scan_result(job_id: str):
