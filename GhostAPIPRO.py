@@ -2,16 +2,16 @@ import os
 import time
 import re
 import selenium
-import undetected_chromedriver as uc # Use v2 for better control
-from seleniumwire import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
-from typing import Optional
+import undetected_chromedriver as uc
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from typing import Optional
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
+from seleniumwire import webdriver
 from urllib.parse import urljoin
 import tldextract
 import threading
@@ -98,8 +98,19 @@ ignore_if_url_contains = [
 
 
 
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from urllib.parse import urlparse
+import threading
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
 def scan_website_v2(url, max_depth=2, timeout=None):
-    start_time=time.time()
+    start_time = time.time()
     visited = []
     content_hashes = []
     detected_gateways = []
@@ -139,19 +150,27 @@ def scan_website_v2(url, max_depth=2, timeout=None):
 
     def crawl_and_network():
         nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
-        logger.info(f"[Debug] Processing URL: {url}")
         driver = None
         try:
+            logger.info(f"[Debug] Processing URL: {url} with UDC")
             driver = create_selenium_wire_driver()
-            logger.info("[Debug] SeleniumWire driver initialized")
-            driver.get(url)
-            logger.info("[Debug] Page loaded successfully")
-            time.sleep(2)
+            logger.info("[Debug] UDC SeleniumWire driver initialized")
+            # Wait for page load to prevent hangs
+            try:
+                driver.get(url)
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                logger.info("[Debug] Page loaded successfully")
+            except TimeoutException as e:
+                logger.warning(f"[Debug] Page load timeout for {url}: {e}")
+                html = driver.page_source.lower()
+                if "cloudflare" in html or "please wait" in html or "checking your browser" in html:
+                    logger.info("[Debug] Cloudflare challenge detected, UDC should handle it")
+                raise TimeoutException(f"Page load failed for {url}")
+            
             if timeout and time.time() - start_time > timeout:
                 logger.info("[Timeout] Reached timeout limit, stopping scan early.")
                 return
 
-            
             driver.execute_script("""
             window.__capturedFetches = [];
             const originalFetch = window.fetch;
@@ -206,7 +225,7 @@ def scan_website_v2(url, max_depth=2, timeout=None):
             for req in driver.requests:
                 if not req.response:
                     continue
-                req_url = req.url.lower()  # Avoid shadowing `url`
+                req_url = req.url.lower()
                 if any(bad in req_url for bad in ignore_if_url_contains):
                     continue
                 body = (req.body or b"").decode("utf-8", errors="ignore")
@@ -252,7 +271,7 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         finally:
             if driver:
                 driver.quit()
-                logger.info("[Debug] SeleniumWire driver closed")
+                logger.info("[Debug] UDC SeleniumWire driver closed")
 
     # Start both scraping and network inspection in parallel
     t1 = threading.Thread(target=crawl_and_scrape)
@@ -277,7 +296,6 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         "country": country_name,
         "ip": ip
     }
-
 
 # Payment gateways
 PAYMENT_GATEWAYS = [
@@ -538,38 +556,53 @@ def create_selenium_driver():
     return driver
 
 
+logger = logging.getLogger(__name__)
 
-def create_selenium_wire_driver(headless=True):
-    options = uc.ChromeOptions()
-    if headless:
-        options.add_argument("--headless")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--disable-infobars")
+def create_selenium_wire_driver():
+    options = Options()
+    options.add_argument("--headless=new")  # New headless mode for better performance
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-extensions")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    # Randomize user agent for better stealth
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
     seleniumwire_options = {
         'verify_ssl': False,
-        'disable_encoding': True,
-        'request_storage_base_dir': '/tmp/seleniumwire',
-        'request_storage': 'memory',
+        'enable_har': True,
+        'request_storage_base_dir': './seleniumwire-storage',  # Adjustable for Render
+        'timeout': 10
     }
 
     try:
-        driver = Chrome(
+        logger.info("[UDC] Initializing undetected-chromedriver with SeleniumWire")
+        # Initialize UDC
+        driver = uc.Chrome(
             options=options,
-            seleniumwire_options=seleniumwire_options,
-            use_subprocess=True,
+            headless=True,
+            version_main=126  # Adjust to match your Chrome version
         )
-        driver.set_page_load_timeout(30)
+        # Patch UDC to support SeleniumWire
+        from seleniumwire.webdriver import Chrome as WireChrome
+        driver.__class__ = WireChrome
+        driver.seleniumwire_options = seleniumwire_options
+        # Additional stealth: Remove webdriver traces
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": """
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.navigator.chrome = { runtime: {} };
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            """
+        })
+        logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
         return driver
     except Exception as e:
-        logger.error(f"[UDC Error] Failed to initialize undetected-chromedriver: {e}")
+        logger.error(f"[UDC Init Error] Failed to create driver: {e}")
         raise
-
 
 
 # Validate URL
@@ -639,7 +672,7 @@ def check_url_status_selenium(url):
 def fetch_url_selenium(url, timeout=15):
     driver = None
     try:
-        driver = create_selenium_wire_driver()
+        driver = create_selenium_driver()
         driver.get(url)
         # Wait until <body> tag is present or timeout
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
