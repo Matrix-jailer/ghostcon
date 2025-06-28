@@ -992,25 +992,7 @@ app = FastAPI()
 # In-memory job store
 jobs = {}
 
-# Placeholder for scan_website_v2 (assumed to be defined elsewhere)
-def scan_website_v2(url: str, timeout: Optional[int] = None) -> dict:
-    # This is a placeholder. Replace with actual implementation.
-    # Example: Perform a scan using Selenium-Wire and return results.
-    return {"success": True, "url": url, "data": "Scan results here"}
-
-def background_scan_v2(url: str, job_id: str, timeout: Optional[int] = None):
-    try:
-        result = scan_website_v2(url, timeout=timeout)
-        jobs[job_id]["status"] = "done"
-        jobs[job_id]["result"] = result
-    except Exception as e:
-        jobs[job_id]["status"] = "done"
-        jobs[job_id]["result"] = {"success": False, "error": f"Background task error: {str(e)}"}
-
-# v1 API (kept for compatibility, assuming scan_website is defined)
-def scan_website(url: str, max_depth: int = 1) -> dict:
-    # Placeholder for v1 scan function
-    return {"success": True, "url": url, "data": "v1 scan results"}
+# Your existing scan_website function must be defined above
 
 def background_scan(url: str, job_id: str):
     try:
@@ -1021,42 +1003,49 @@ def background_scan(url: str, job_id: str):
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = {"success": False, "error": f"Background task error: {str(e)}"}
 
-# v1 API Endpoint
+
 @app.get("/sexy_api/gate")
 async def start_scan_get(url: HttpUrl):
     """
-    Starts scan using GET (v1, useful for browsers)
+    Starts scan using GET (useful for browsers)
     """
     job_id = str(uuid4())
     jobs[job_id] = {"status": "pending", "result": None}
     threading.Thread(target=background_scan, args=(str(url), job_id)).start()
     return {"job_id": job_id, "message": "Scan started"}
 
-# v2 API Endpoint
-@app.get("/sexy_api/v2/gate")
-async def start_scan_v2_get(url: HttpUrl, timeout: Optional[int] = None):
-    """
-    Starts v2 scan using GET (Selenium-Wire powered, with optional timeout)
-    """
-    job_id = str(uuid4())
-    jobs[job_id] = {"status": "pending", "result": None}
-    threading.Thread(target=background_scan_v2, args=(str(url), job_id, timeout)).start()
-    return {"job_id": job_id, "message": "Scan started"}
-
-# Shared Results Endpoint
 @app.get("/sexy_api/results/{job_id}")
 async def get_scan_result(job_id: str):
-    """
-    Retrieves scan results for a given job ID (used by both v1 and v2)
-    """
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job ID not found")
     if jobs[job_id]["status"] != "done":
         return {"status": "pending"}
     return {"status": "done", "result": jobs[job_id]["result"]}
 
-# Run the server
+port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
+
+
+@app.get("/sexy_api/v2/gate")
+def scan_gateway_direct(url: HttpUrl, timeout: Optional[int] = None):
+    """
+    NEW: Direct scan without background thread (Selenium-Wire powered)
+    """
+    try:
+        result = scan_website_v2(str(url), timeout=timeout)
+        return {"status": "done", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/sexy_api/results/{job_id}")
+async def get_scan_result(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job ID not found")
+    if jobs[job_id]["status"] != "done":
+        return {"status": "pending"}
+    return {"status": "done", "result": jobs[job_id]["result"]}
+
 port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    import uvicorn
+    uvicorn.run("GhostAPIPRO:app", host="0.0.0.0", port=port)
