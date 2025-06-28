@@ -4,6 +4,7 @@ import re
 import selenium
 from seleniumwire import webdriver
 import tempfile  # Add this import
+from selenium.webdriver.chrome.service import Service.
 from contextlib import contextmanager
 import undetected_chromedriver as uc
 from selenium.webdriver.support.ui import WebDriverWait
