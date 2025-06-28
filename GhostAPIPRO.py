@@ -548,6 +548,7 @@ def create_selenium_driver():
 
 
 
+
 logger = logging.getLogger(__name__)
 
 def create_selenium_wire_driver():
@@ -564,21 +565,31 @@ def create_selenium_wire_driver():
     seleniumwire_options = {
         'verify_ssl': False,
         'enable_har': True,
-        'request_storage_base_dir': '/tmp/seleniumwire-storage',
+        'request_storage_base_dir': '/tmp/seleniumwire-storage',  # Render-compatible
         'timeout': 10
     }
 
     try:
         logger.info("[UDC] Initializing undetected-chromedriver with SeleniumWire")
+        # Create a temporary copy of ChromeDriver to avoid file lock
+        with tempfile.NamedTemporaryFile(suffix='_chromedriver', delete=False) as temp_driver:
+            temp_driver_path = temp_driver.name
+            os.system(f"cp /usr/local/bin/chromedriver {temp_driver_path}")
+            os.chmod(temp_driver_path, 0o755)
+
         driver = uc.Chrome(
             options=options,
             headless=True,
-            driver_executable_path='/usr/local/bin/chromedriver',  # Use Dockerfile’s ChromeDriver
-            version_main=138
+            driver_executable_path=temp_driver_path,  # Use temporary ChromeDriver
+            version_main=138  # Matches Dockerfile
         )
-        from seleniumwire.webdriver import Chrome as WireChrome
-        driver.__class__ = WireChrome
-        driver.seleniumwire_options = seleniumwire_options
+        # Initialize SeleniumWire with UDC's service
+        driver = webdriver.Chrome(
+            service=driver.service,  # Reuse UDC's service
+            options=options,
+            seleniumwire_options=seleniumwire_options
+        )
+        # Apply stealth settings
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -591,7 +602,15 @@ def create_selenium_wire_driver():
         return driver
     except Exception as e:
         logger.error(f"[UDC Init Error] Failed to create driver: {e}")
+        if 'temp_driver_path' in locals():
+            os.unlink(temp_driver_path)  # Clean up temporary file
         raise
+    finally:
+        if 'temp_driver_path' in locals():
+            try:
+                os.unlink(temp_driver_path)  # Ensure cleanup
+            except Exception as e:
+                logger.warning(f"[Cleanup Error] Failed to delete temp ChromeDriver: {e}")
 
 # Validate URL
 from urllib.parse import urlparse
@@ -662,19 +681,22 @@ def fetch_url_selenium(url, timeout=15):
     try:
         driver = create_selenium_wire_driver()
         driver.get(url)
-        # Wait until <body> tag is present or timeout
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         html_chunks = extract_deep_html(driver)
         combined_html = "\n".join(html_chunks)
         final_url = driver.current_url
-        final_url = driver.current_url
         return combined_html, final_url
     except (TimeoutException, WebDriverException) as e:
-        print(f"Selenium error fetching {url}: {e}")
+        logger.error(f"[Selenium Error] Fetching {url}: {e}")
         return "", url
     finally:
         if driver:
-            driver.quit()
+            try:
+                driver.quit()
+            except Exception as e:
+                logger.warning(f"[Selenium Quit Error] Failed to quit driver: {e}")
+
+
 
 def extract_deep_html(driver):
     html_chunks = []
