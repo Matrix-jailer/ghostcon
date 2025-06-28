@@ -591,7 +591,7 @@ def create_selenium_wire_driver():
         'enable_har': True,
         'request_storage_base_dir': '/tmp/seleniumwire-storage',
         'timeout': 10,
-        'port': random.randint(49152, 65535)  # Random high port
+        'port': random.randint(49152, 65535),  # Random high port
         'addr': '127.0.0.1',  # Explicit localhost binding
     }
 
