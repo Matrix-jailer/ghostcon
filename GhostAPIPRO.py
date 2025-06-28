@@ -2,6 +2,9 @@ import os
 import time
 import re
 import selenium
+from seleniumwire import webdriver
+import tempfile  # Add this import
+from contextlib import contextmanager
 import undetected_chromedriver as uc
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -551,6 +554,22 @@ def create_selenium_driver():
 
 logger = logging.getLogger(__name__)
 
+@contextmanager
+def temp_chromedriver():
+    temp_driver = tempfile.NamedTemporaryFile(suffix='_chromedriver', delete=False)
+    temp_driver_path = temp_driver.name
+    temp_driver.close()
+    try:
+        os.system(f"cp /usr/local/bin/chromedriver {temp_driver_path}")
+        os.chmod(temp_driver_path, 0o755)
+        yield temp_driver_path
+    finally:
+        try:
+            os.unlink(temp_driver_path)
+            logger.debug(f"[Cleanup] Deleted temporary ChromeDriver: {temp_driver_path}")
+        except Exception as e:
+            logger.warning(f"[Cleanup Error] Failed to delete temp ChromeDriver {temp_driver_path}: {e}")
+
 def create_selenium_wire_driver():
     options = Options()
     options.add_argument("--headless=new")
@@ -565,53 +584,46 @@ def create_selenium_wire_driver():
     seleniumwire_options = {
         'verify_ssl': False,
         'enable_har': True,
-        'request_storage_base_dir': '/tmp/seleniumwire-storage',  # Render-compatible
+        'request_storage_base_dir': '/tmp/seleniumwire-storage',
         'timeout': 10
     }
 
     try:
         logger.info("[UDC] Initializing undetected-chromedriver with SeleniumWire")
-        # Create a temporary copy of ChromeDriver to avoid file lock
-        with tempfile.NamedTemporaryFile(suffix='_chromedriver', delete=False) as temp_driver:
-            temp_driver_path = temp_driver.name
-            os.system(f"cp /usr/local/bin/chromedriver {temp_driver_path}")
-            os.chmod(temp_driver_path, 0o755)
-
-        driver = uc.Chrome(
-            options=options,
-            headless=True,
-            driver_executable_path=temp_driver_path,  # Use temporary ChromeDriver
-            version_main=138  # Matches Dockerfile
-        )
-        # Initialize SeleniumWire with UDC's service
-        driver = webdriver.Chrome(
-            service=driver.service,  # Reuse UDC's service
-            options=options,
-            seleniumwire_options=seleniumwire_options
-        )
-        # Apply stealth settings
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": """
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                window.navigator.chrome = { runtime: {} };
-                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            """
-        })
-        logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
-        return driver
+        with temp_chromedriver() as temp_driver_path:
+            driver = uc.Chrome(
+                options=options,
+                headless=True,
+                driver_executable_path=temp_driver_path,
+                version_main=138
+            )
+            # Initialize SeleniumWire with UDC's service
+            driver = webdriver.Chrome(
+                service=driver.service,
+                options=options,
+                seleniumwire_options=seleniumwire_options
+            )
+            # Apply stealth settings
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": """
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    window.navigator.chrome = { runtime: {} };
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                """
+            })
+            # Verify network capture
+            try:
+                driver.get("about:blank")
+                driver.requests  # Test network capture
+                logger.debug("[UDC] Network capture verified")
+            except Exception as e:
+                logger.warning(f"[UDC] Network capture test failed: {e}")
+            logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
+            return driver
     except Exception as e:
         logger.error(f"[UDC Init Error] Failed to create driver: {e}")
-        if 'temp_driver_path' in locals():
-            os.unlink(temp_driver_path)  # Clean up temporary file
         raise
-    finally:
-        if 'temp_driver_path' in locals():
-            try:
-                os.unlink(temp_driver_path)  # Ensure cleanup
-            except Exception as e:
-                logger.warning(f"[Cleanup Error] Failed to delete temp ChromeDriver: {e}")
-
 # Validate URL
 from urllib.parse import urlparse
 
