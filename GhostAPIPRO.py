@@ -552,20 +552,19 @@ logger = logging.getLogger(__name__)
 
 def create_selenium_wire_driver():
     options = Options()
-    options.add_argument("--headless=new")  # New headless mode for better performance
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    # Randomize user agent for stealth
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
 
     seleniumwire_options = {
         'verify_ssl': False,
         'enable_har': True,
-        'request_storage_base_dir': '/tmp/seleniumwire-storage',  # Render-compatible
+        'request_storage_base_dir': '/tmp/seleniumwire-storage',
         'timeout': 10
     }
 
@@ -574,13 +573,12 @@ def create_selenium_wire_driver():
         driver = uc.Chrome(
             options=options,
             headless=True,
-            version_main=138  # Matches Chrome 138 from Dockerfile
+            driver_executable_path='/usr/local/bin/chromedriver',  # Use Dockerfile’s ChromeDriver
+            version_main=138
         )
-        # Patch UDC to support SeleniumWire
         from seleniumwire.webdriver import Chrome as WireChrome
         driver.__class__ = WireChrome
         driver.seleniumwire_options = seleniumwire_options
-        # Additional stealth: Remove webdriver traces
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -594,7 +592,6 @@ def create_selenium_wire_driver():
     except Exception as e:
         logger.error(f"[UDC Init Error] Failed to create driver: {e}")
         raise
-
 
 # Validate URL
 from urllib.parse import urlparse
