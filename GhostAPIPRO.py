@@ -552,6 +552,8 @@ def create_selenium_driver():
 
 
 
+
+
 logger = logging.getLogger(__name__)
 
 @contextmanager
@@ -580,13 +582,16 @@ def create_selenium_wire_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
+    options.add_argument("--disable-site-isolation-trials")  # Reduce resource usage
+    options.add_argument("--disable-features=IsolateOrigins,site-per-process")  # Avoid iframe issues
 
     seleniumwire_options = {
         'verify_ssl': False,
         'enable_har': True,
         'request_storage_base_dir': '/tmp/seleniumwire-storage',
         'timeout': 10,
-        'port': random.randint(49152, 65535)  # Use random high port to avoid conflicts
+        'port': random.randint(49152, 65535)  # Random high port
+        'addr': '127.0.0.1',  # Explicit localhost binding
     }
 
     max_retries = 3
@@ -594,12 +599,14 @@ def create_selenium_wire_driver():
         try:
             logger.info(f"[UDC] Initializing undetected-chromedriver with SeleniumWire (Attempt {attempt + 1}/{max_retries})")
             with temp_chromedriver() as temp_driver_path:
+                # Create a service with a unique port
+                service = Service(executable_path=temp_driver_path, port=random.randint(49152, 65535))
                 driver = uc.Chrome(
                     options=options,
-                    headless=True,
-                    driver_executable_path=temp_driver_path,
+                    service=service,
                     version_main=138,
-                    seleniumwire_options=seleniumwire_options  # Pass SeleniumWire options directly
+                    use_subprocess=True,  # Ensure ChromeDriver runs in separate process
+                    seleniumwire_options=seleniumwire_options
                 )
                 # Apply stealth settings
                 driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -615,8 +622,9 @@ def create_selenium_wire_driver():
                     driver.get("about:blank")
                     driver.requests  # Test network capture
                     logger.debug("[UDC] Network capture verified")
-                except Exception as e:
-                    logger.warning(f"[UDC] Network capture test failed: {e}")
+                except AttributeError as e:
+                    logger.error(f"[UDC] Network capture failed: {e}")
+                    raise
                 logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
                 return driver
         except Exception as e:
@@ -702,13 +710,15 @@ def fetch_url_selenium(url, timeout=15):
     except (TimeoutException, WebDriverException) as e:
         logger.error(f"[Selenium Error] Fetching {url}: {e}")
         return "", url
+    except Exception as e:
+        logger.error(f"[Unexpected Error] Fetching {url}: {e}")
+        return "", url
     finally:
         if driver:
             try:
                 driver.quit()
             except Exception as e:
                 logger.warning(f"[Selenium Quit Error] Failed to quit driver: {e}")
-
 
 def extract_deep_html(driver):
     html_chunks = []
@@ -753,7 +763,40 @@ def extract_deep_html(driver):
 
     return html_chunks
     
-
+def extract_deep_html(driver):
+    html_chunks = []
+    try:
+        # Main page HTML
+        html_chunks.append(driver.page_source)
+        
+        # Extract iframes
+        try:
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            for i, iframe in enumerate(iframes):
+                try:
+                    driver.switch_to.frame(iframe)
+                    html_chunks.append(driver.page_source)
+                    driver.switch_to.default_content()
+                except Exception as e:
+                    logger.warning(f"[Deep HTML] Failed to access iframe #{i}: {e}")
+        except Exception as e:
+            logger.warning(f"[Deep HTML] Error iterating iframes: {e}")
+        
+        # Extract Shadow DOMs
+        try:
+            shadow_doms = driver.execute_script("""
+                return Array.from(document.querySelectorAll('*'))
+                    .filter(el => el.shadowRoot)
+                    .map(el => el.shadowRoot.innerHTML);
+            """)
+            html_chunks.extend(shadow_doms)
+        except Exception as e:
+            logger.warning(f"[Deep HTML] Failed to read Shadow DOMs: {e}")
+        
+        return html_chunks
+    except Exception as e:
+        logger.error(f"[Deep HTML] Unexpected error: {e}")
+        return html_chunks
 
 def extract_links_from_buttons_and_anchors(html, base_url):
     """Extracts useful links from <a>, <button>, <form>, and JS onclicks."""
