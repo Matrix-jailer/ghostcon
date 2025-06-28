@@ -130,9 +130,13 @@ def scan_website_v2(url, max_depth=2):
 
     def crawl_and_network():
         nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
-        driver = create_selenium_wire_driver()
+        logger.info(f"[Debug] Processing URL: {url}")
+        driver = None
         try:
+            driver = create_selenium_wire_driver()
+            logger.info("[Debug] SeleniumWire driver initialized")
             driver.get(url)
+            logger.info("[Debug] Page loaded successfully")
             time.sleep(2)
             driver.execute_script("""
             window.__capturedFetches = [];
@@ -154,7 +158,7 @@ def scan_website_v2(url, max_depth=2):
             """)
             time.sleep(4)
 
-            # Collect fetch logs after page settles
+            # Collect fetch logs
             try:
                 fetch_logs = driver.execute_script("return window.__capturedFetches || []")
                 for entry in fetch_logs:
@@ -173,7 +177,7 @@ def scan_website_v2(url, max_depth=2):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
 
-            # 👇 Try to click any payment-related buttons
+            # Click payment-related buttons
             try:
                 clickable_keywords = ["buy", "subscribe", "checkout", "payment", "plan", "join", "start"]
                 buttons = driver.find_elements(By.TAG_NAME, "button") + driver.find_elements(By.TAG_NAME, "a")
@@ -181,27 +185,25 @@ def scan_website_v2(url, max_depth=2):
                     text = btn.text.strip().lower()
                     if any(kw in text for kw in clickable_keywords):
                         btn.click()
-                        time.sleep(3)  # Let it load checkout
+                        time.sleep(3)
             except Exception as click_err:
                 logger.info(f"[Click] No interactive buttons clicked: {click_err}")
 
             for req in driver.requests:
                 if not req.response:
                     continue
-                url = req.url.lower()
-                if any(bad in url for bad in ignore_if_url_contains):
-                    continue  # Skip non-relevant URLs early
+                req_url = req.url.lower()  # Avoid shadowing `url`
+                if any(bad in req_url for bad in ignore_if_url_contains):
+                    continue
                 body = (req.body or b"").decode("utf-8", errors="ignore")
-                combined_content = (url + " " + body).lower()
+                combined_content = (req_url + " " + body).lower()
 
-                # Match logic (unchanged)
                 if (
                     "client_secret" in combined_content or
                     "publishable_key" in combined_content or
                     "checkout.stripe.com" in combined_content or
                     ("js.stripe.com" in combined_content and "stripe" in combined_content)
                 ):
-                    # Do your processing here
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
@@ -211,8 +213,7 @@ def scan_website_v2(url, max_depth=2):
                     detected_cards |= cards
                     if cf: cf_detected = True
                     if gql == "True": graphql_detected = "True"
-
-                elif "paypal.com/sdk/js" in combined_content or "paypal" in req.url:
+                elif "paypal.com/sdk/js" in combined_content or "paypal" in req_url:
                     logger.info(f"[Net Gateway Match] PAYPAL-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
@@ -222,12 +223,10 @@ def scan_website_v2(url, max_depth=2):
                     detected_cards |= cards
                     if cf: cf_detected = True
                     if gql == "True": graphql_detected = "True"
-
-                elif any(p in req.url.lower() for p in network_payment_url_keywords):
+                elif any(p in req_url for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    detected_gateways_set |= gw_set
-                    detected_3d |= tds
+                    detected koron = tds
                     detected_captcha |= cap
                     detected_platforms |= plat
                     detected_cards |= cards
@@ -235,9 +234,11 @@ def scan_website_v2(url, max_depth=2):
                     if gql == "True": graphql_detected = "True"
 
         except Exception as e:
-            print(f"[SeleniumWire Error] {e}")
+            logger.error(f"[SeleniumWire Error] Exception for URL {url}: {e}")
         finally:
-            driver.quit()
+            if driver:
+                driver.quit()
+                logger.info("[Debug] SeleniumWire driver closed")
 
     # Start both scraping and network inspection in parallel
     t1 = threading.Thread(target=crawl_and_scrape)
@@ -259,7 +260,7 @@ def scan_website_v2(url, max_depth=2):
         "cloudflare": cf_detected,
         "graphql": graphql_detected,
         "cards": sorted(detected_cards),
-        "country": country_name,
+        "country": country_name{-\
         "ip": ip
     }
 
