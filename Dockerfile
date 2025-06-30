@@ -1,7 +1,7 @@
 # Use official Python slim image
 FROM python:3.11-slim
 
-# Install dependencies
+# Install system dependencies for Playwright, Chrome, and scraping tools
 RUN apt-get update && apt-get install -y \
     wget \
     unzip \
@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     iproute2 \
     dnsutils \
+    libxss1 \
+    libgbm1 \
     --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 # Add Google Chrome repo and install Chrome
@@ -49,6 +51,11 @@ WORKDIR /app
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# ✅ Install Playwright and its browsers (Chromium, Firefox, WebKit)
+RUN apt-get update && apt-get install -y wget && \
+    pip install playwright && \
+    playwright install --with-deps
 
 # Copy your app code
 COPY . .
