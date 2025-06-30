@@ -2,6 +2,7 @@ import os
 import time
 import re
 import selenium
+from typing import Optional
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -20,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Manager, Pool
 import hashlib
 import random
-from multiprocessing import Pool
+from playwright.async_api import async_playwright
 import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import HttpUrl
@@ -64,10 +65,40 @@ network_payment_url_keywords = [
     "/complete",  # e.g., /payment/complete
 ]
 
+ignore_if_url_contains = [
+    # Common asset/content folders
+    "wp-content", "wp-includes", "skin/frontend", "/assets/", "/themes/", "/static/", "/media/", "/images/", "/img/",
+
+    "https://facebook.com", "https://googlemanager.com", "https://static.klaviyo.com", "static.klaviyo.com", "https://content-autofill.googleapis.com",
+    "content-autofill.googleapis.com", "https://www.google.com", "https://googleads.g.doubleclick.net", "googleads.g.doubleclick.net", "googleads.g.doubleclick.net",
+    "https://www.googletagmanager.com", "googletagmanager.com", "https://www.googleadservices.com", "googleadservices.com", "https://fonts.googleapis.com",
+    "fonts.googleapis.com", "http://clients2.google.com", "clients2.google.com", "https://analytics.google.com", "hanalytics.google.com",
+    
+    # Analytics & marketing scripts
+    "googleapis", "gstatic", "googletagmanager", "google-analytics", "analytics", "doubleclick.net", 
+    "facebook.net", "fbcdn", "pixel.", "tiktokcdn", "matomo", "segment.io", "clarity.ms", "mouseflow", "hotjar", 
+    
+    # Fonts, icons, visual only
+    "fonts.", "fontawesome", ".woff", ".woff2", ".ttf", ".eot", ".otf", ".ico", ".svg",
+    
+    # CDN & framework scripts
+    "cdn.jsdelivr.net", "cloudflareinsights.com", "cdnjs", "bootstrapcdn", "polyfill.io", 
+    "jsdelivr.net", "unpkg.com", "yastatic.net", "akamai", "fastly", 
+    
+    # Media, tracking images
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".ico", 
+    
+    # Useless scripts/styles
+    ".css", ".scss", ".less", ".map", ".js", "main.js", "bundle.js", "common.js", "theme.js", "style.css", "custom.css",
+
+    # Other non-payment known paths
+    "/favicon", "/robots.txt", "/sitemap", "/manifest", "/rss", "/feed", "/help", "/support", "/about", "/terms", "/privacy",
+]
 
 
 
-def scan_website_v2(url, max_depth=2):
+async def scan_website_v2(url, max_depth=2, timeout=None):
+    start_time = time.time()
     visited = []
     content_hashes = []
     detected_gateways = []
@@ -93,24 +124,101 @@ def scan_website_v2(url, max_depth=2):
         if cf: cf_detected = True
         if gql == "True": graphql_detected = "True"
 
-    def crawl_and_scrape():
-        args = (url, max_depth, visited, content_hashes, base_domain, detected_gateways)
-        results = crawl_worker(args)
-        for html, page_url in results:
-            process(html, page_url)
+    async def process_async(html, page_url):
+        nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
+        gw_set, tds, captcha, platforms, cf, cards, gql = detect_features(html, page_url, detected_gateways)
+        detected_gateways_set |= gw_set
+        detected_3d |= tds
+        detected_captcha |= captcha
+        detected_platforms |= platforms
+        detected_cards |= cards
+        if cf: cf_detected = True
+        if gql == "True": graphql_detected = "True"
+
+
+    async def crawl_and_scrape():
+        if timeout and time.time() - start_time > timeout:
+            logger.info("[Timeout] Reached timeout limit, stopping scan early.")
+            return
+        try:
+            results = await run_crawlers_async([url], max_depth=1)
+            tasks = []
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context()
+                for link in results:
+                    if timeout and time.time() - start_time > timeout:
+                        logger.info("[Timeout] Scraper loop exited early during processing.")
+                        return
+                    page = await context.new_page()
+                    try:
+                        await page.goto(link, timeout=15000)
+                        await asyncio.sleep(1)
+                        html = await page.content()
+                        tasks.append(process_async(html, link))
+                    except Exception as e:
+                        logger.error(f"[Playwright Error] {link}: {e}")
+                    finally:
+                        await page.close()
+                await asyncio.gather(*tasks)
+                await context.close()
+                await browser.close()
+        except Exception as e:
+            logger.error(f"[Crawl Error] {url}: {e}")
+
 
     def crawl_and_network():
         nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
-        driver = create_selenium_wire_driver()
+        logger.info(f"[Debug] Processing URL: {url}")
+        driver = None
         try:
+            driver = create_selenium_wire_driver()
+            logger.info("[Debug] SeleniumWire driver initialized")
             driver.get(url)
+            logger.info("[Debug] Page loaded successfully")
             time.sleep(2)
+            if timeout and time.time() - start_time > timeout:
+                logger.info("[Timeout] Reached timeout limit, stopping scan early.")
+                return
 
-            # 👇 Add scroll to bottom (optional lazy load trigger)
+            driver.execute_script("""
+            window.__capturedFetches = [];
+            const originalFetch = window.fetch;
+            window.fetch = async function(...args) {
+                const response = await originalFetch(...args);
+                const clone = response.clone();
+                try {
+                    const bodyText = await clone.text();
+                    window.__capturedFetches.push({
+                        url: args[0],
+                        method: (args[1] && args[1].method) || 'GET',
+                        body: (args[1] && args[1].body) || '',
+                        response: bodyText
+                    });
+                } catch (e) {}
+                return response;
+            };
+            """)
+            time.sleep(4)
+
+            try:
+                fetch_logs = driver.execute_script("return window.__capturedFetches || []")
+                for entry in fetch_logs:
+                    combined = f"{entry['url']} {entry['body']} {entry['response']}".lower()
+                    gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined, entry['url'], detected_gateways)
+                    detected_gateways_set |= gw_set
+                    detected_3d |= tds
+                    detected_captcha |= cap
+                    detected_platforms |= plat
+                    detected_cards |= cards
+                    if cf: cf_detected = True
+                    if gql == "True": graphql_detected = "True"
+            except Exception as fetch_error:
+                logger.info(f"[Fetch Hook Error] {fetch_error}")
+
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
 
-            # 👇 Try to click any payment-related buttons
             try:
                 clickable_keywords = ["buy", "subscribe", "checkout", "payment", "plan", "join", "start"]
                 buttons = driver.find_elements(By.TAG_NAME, "button") + driver.find_elements(By.TAG_NAME, "a")
@@ -118,22 +226,25 @@ def scan_website_v2(url, max_depth=2):
                     text = btn.text.strip().lower()
                     if any(kw in text for kw in clickable_keywords):
                         btn.click()
-                        time.sleep(3)  # Let it load checkout
+                        time.sleep(3)
             except Exception as click_err:
                 logger.info(f"[Click] No interactive buttons clicked: {click_err}")
-
 
             for req in driver.requests:
                 if not req.response:
                     continue
                 req_url = req.url.lower()
                 if any(bad in req_url for bad in ignore_if_url_contains):
-                    continue  # Skip non-relevant URLs early
+                    continue
                 body = (req.body or b"").decode("utf-8", errors="ignore")
                 combined_content = (req_url + " " + body).lower()
 
-                # Match logic (unchanged)
-                if any(kw in combined_content for kw in ["pi_", "client_secret", "publishable_key", "checkout.stripe.com"]):
+                if (
+                    "client_secret" in combined_content or
+                    "publishable_key" in combined_content or
+                    "checkout.stripe.com" in combined_content or
+                    ("js.stripe.com" in combined_content and "stripe" in combined_content)
+                ):
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
@@ -143,8 +254,7 @@ def scan_website_v2(url, max_depth=2):
                     detected_cards |= cards
                     if cf: cf_detected = True
                     if gql == "True": graphql_detected = "True"
-
-                elif "paypal.com/sdk/js" in combined_content or "paypal" in req.url:
+                elif "paypal.com/sdk/js" in combined_content or "paypal" in req_url:
                     logger.info(f"[Net Gateway Match] PAYPAL-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
@@ -154,11 +264,9 @@ def scan_website_v2(url, max_depth=2):
                     detected_cards |= cards
                     if cf: cf_detected = True
                     if gql == "True": graphql_detected = "True"
-
-                elif any(p in req.url.lower() for p in network_payment_url_keywords):
+                elif any(p in req_url for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    detected_gateways_set |= gw_set
                     detected_3d |= tds
                     detected_captcha |= cap
                     detected_platforms |= plat
@@ -167,12 +275,14 @@ def scan_website_v2(url, max_depth=2):
                     if gql == "True": graphql_detected = "True"
 
         except Exception as e:
-            print(f"[SeleniumWire Error] {e}")
+            logger.error(f"[SeleniumWire Error] Exception for URL {url}: {e}")
         finally:
-            driver.quit()
+            if driver:
+                driver.quit()
+                logger.info("[Debug] SeleniumWire driver closed")
 
     # Start both scraping and network inspection in parallel
-    t1 = threading.Thread(target=crawl_and_scrape)
+    t1 = threading.Thread(target=lambda: asyncio.run(crawl_and_scrape()))
     t2 = threading.Thread(target=crawl_and_network)
     t1.start()
     t2.start()
@@ -194,6 +304,20 @@ def scan_website_v2(url, max_depth=2):
         "country": country_name,
         "ip": ip
     }
+
+
+
+def background_scan_v2(url: str, job_id: str, timeout: int = None):
+    try:
+        result = asyncio.run(scan_website_v2(url, timeout=timeout))
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["result"] = result
+    except Exception as e:
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["result"] = {
+            "success": False,
+            "error": f"[v2 error] {str(e)}"
+        }
 
 
 
@@ -282,7 +406,7 @@ THREE_D_SECURE_KEYWORDS = [re.compile(pattern, re.IGNORECASE) for pattern in [
 GATEWAY_KEYWORDS = {
     "stripe": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'stripe\.com', r'api\.stripe\.com/v1', r'js\.stripe\.com', r'stripe\.js', r'stripe\.min\.js',
-        r'client_secret', r'pi_', r'payment_intent', r'data-stripe', r'stripe-payment-element',
+        r'client_secret', r'payment_intent', r'data-stripe', r'stripe-payment-element',
         r'stripe-elements', r'stripe-checkout', r'hooks\.stripe\.com', r'm\.stripe\.network',
         r'stripe__input', r'stripe-card-element', r'stripe-v3ds', r'confirmCardPayment',
         r'createPaymentMethod', r'stripePublicKey', r'stripe\.handleCardAction',
@@ -419,9 +543,9 @@ PAYMENT_INDICATOR_REGEX = [
         "secure-payment", "pay-securely", "shop-secure", "give", "donate-now", "donatenow",
         "donate_now", "get-now", "browse", "category", "items", "product", "item",
         "giftcard", "topup", "plans", "buynow", "sell", "sell-now", "purchase-now",
-        "shopnow", "shopping", "menu", "games", "accessories", "men", "women",
-        "collections", "sale", "vps", "server", "about", "about-us", "shirt", "pant",
-        "hoodie", "keys", "cart-items", "buy-secure", "cart-page", "basket", "checkout-page",
+        "shopnow", "shopping", "menu", "games",
+        "sale", "vps", "server", "about", "about-us",
+        "cart-items", "buy-secure", "cart-page", "checkout-page",
         "order-summary", "payment-form", "purchase-flow", "shop-cart", "ecommerce", "store-cart",
         "buy-button", "purchase-button", "add-item", "remove-item", "cart-update",
         "apply-coupon", "redeem-code", "discount-code", "promo-code", "gift-card", "pay-with",
@@ -430,10 +554,10 @@ PAYMENT_INDICATOR_REGEX = [
 ]
 
 # Non-HTML extensions
-NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf'}
+NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf', '.icon', '.img'}
 
 # Skip domains
-SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com'}
+SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com', 'https://facebook.com', 'https://googlemanager.com', 'https://static.klaviyo.com', 'static.klaviyo.com', 'https://content-autofill.googleapis.com', 'content-autofill.googleapis.com', 'https://www.google.com', 'https://googleads.g.doubleclick.net', 'googleads.g.doubleclick.net', 'googleads.g.doubleclick.net', 'https://www.googletagmanager.com', 'googletagmanager.com', 'https://www.googleadservices.com', 'googleadservices.com', 'https://fonts.googleapis.com', 'fonts.googleapis.com', 'http://clients2.google.com', 'clients2.google.com', 'https://analytics.google.com', 'hanalytics.google.com'}
 
 # User-Agent strings
 USER_AGENTS = [
@@ -547,15 +671,61 @@ def fetch_url_selenium(url, timeout=15):
         driver.get(url)
         # Wait until <body> tag is present or timeout
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        page_source = driver.page_source
+        html_chunks = extract_deep_html(driver)
+        combined_html = "\n".join(html_chunks)
         final_url = driver.current_url
-        return page_source, final_url
+        final_url = driver.current_url
+        return combined_html, final_url
     except (TimeoutException, WebDriverException) as e:
         print(f"Selenium error fetching {url}: {e}")
         return "", url
     finally:
         if driver:
             driver.quit()
+
+def extract_deep_html(driver):
+    html_chunks = []
+
+    # Add main page HTML
+    try:
+        html_chunks.append(driver.page_source)
+    except Exception as e:
+        logger.warning(f"[Deep HTML] Failed to get main page HTML: {e}")
+
+    # Extract iframe content
+    try:
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for i, iframe in enumerate(iframes):
+            try:
+                driver.switch_to.frame(iframe)
+                html_chunks.append(driver.page_source)
+                driver.switch_to.default_content()
+            except Exception as e:
+                logger.info(f"[Deep HTML] Failed to access iframe #{i}: {e}")
+                driver.switch_to.default_content()
+    except Exception as e:
+        logger.warning(f"[Deep HTML] Error iterating iframes: {e}")
+
+    # Shadow DOMs (basic attempt)
+    try:
+        shadow_roots = driver.execute_script("""
+            let shadows = [];
+            function deepSearch(el) {
+                if (!el || !el.shadowRoot) return;
+                shadows.push(el.shadowRoot.innerHTML);
+                el.shadowRoot.querySelectorAll('*').forEach(deepSearch);
+            }
+            document.querySelectorAll('*').forEach(el => {
+                if (el.shadowRoot) deepSearch(el);
+            });
+            return shadows;
+        """)
+        html_chunks.extend(shadow_roots or [])
+    except Exception as e:
+        logger.warning(f"[Deep HTML] Failed to read Shadow DOMs: {e}")
+
+    return html_chunks
+    
 
 
 def extract_links_from_buttons_and_anchors(html, base_url):
@@ -702,47 +872,27 @@ def detect_features(html_content, file_url, detected_gateways):
 
 
 # Crawl worker
-def crawl_worker(args):
-    url, max_depth, visited, content_hashes, base_domain, detected_gateways = args
-    if url in visited or len(visited) > 50:
+async def crawl_worker_async(page, url, max_depth, indicators):
+    try:
+        await page.goto(url, timeout=15000)
+        await asyncio.sleep(1)
+        content = await page.content()
+
+        # indicator matching
+        if not any(ind in url.lower() for ind in indicators):
+            return []
+
+        # extract links
+        links = await page.eval_on_selector_all(
+            "a",
+            "els => els.map(el => el.href).filter(Boolean)"
+        )
+
+        return links
+    except Exception as e:
+        print(f"[error] {url}: {e}")
         return []
-    visited.append(url)
-    if max_depth < 1 or not is_valid_url(url, base_domain):
-        return []
 
-    html_content, fetched_url = fetch_url_selenium(url)
-    if not html_content:
-        return [(html_content, fetched_url)]
-    
-    content_hash = hashlib.md5(html_content.encode('utf-8')).hexdigest()
-    if content_hash in content_hashes:
-        return [(html_content, fetched_url)]
-    
-    content_hashes.append(content_hash)
-    results = [(html_content, fetched_url)]
-    raw_sources = get_all_sources(fetched_url, html_content, base_domain)
-    sources = list(set(raw_sources))
-
-    # Recursive crawl for deeper links if max_depth > 1
-    if max_depth > 1:
-        sub_args = [
-            (source, max_depth - 1, visited, content_hashes, base_domain, detected_gateways)
-            for source in sources
-        ]
-        with Pool(processes=8) as pool:
-            sub_results = pool.map(crawl_worker, sub_args)
-            for res in sub_results:
-                results.extend(res)
-
-    return results
-
-    if max_depth > 1:
-        sub_args = [(source, max_depth - 1, visited, content_hashes, base_domain, detected_gateways) for source in sources]
-        with Pool(processes=8) as pool:
-            sub_results = pool.map(crawl_worker, sub_args)
-            for sub_result in sub_results:
-                results.extend(sub_result)
-    return results
 
 
 # Get IP address
@@ -751,6 +901,31 @@ def get_ip(domain):
         return socket.gethostbyname(domain)
     except:
         return "Unknown"
+async def run_crawlers_async(start_urls, max_depth=1, concurrency=10):
+    from playwright.async_api import async_playwright
+    sema = asyncio.Semaphore(concurrency)
+    results = set()
+    indicators = ["checkout", "pay", "cart", "purchase", "order"]  # your keywords
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
+        page_pool = [await context.new_page() for _ in range(concurrency)]
+
+        async def crawl_task(page, url):
+            async with sema:
+                links = await crawl_worker_async(page, url, max_depth, indicators)
+                for l in links:
+                    results.add(l)
+
+        tasks = [crawl_task(page_pool[i % concurrency], url) for i, url in enumerate(start_urls)]
+        await asyncio.gather(*tasks)
+
+        await context.close()
+        await browser.close()
+
+    return list(results)
+
 
 # Country detection
 def get_country_from_tld_or_ip(url, ip):
@@ -870,7 +1045,7 @@ jobs = {}
 
 def background_scan(url: str, job_id: str):
     try:
-        result = scan_website(url, max_depth=1)
+        result = asyncio.run(scan_website(url, max_depth=1))
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = result
     except Exception as e:
@@ -900,15 +1075,14 @@ port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 
 @app.get("/sexy_api/v2/gate")
-def scan_gateway_direct(url: HttpUrl):
+async def start_scan_v2_get(url: HttpUrl, timeout: Optional[int] = None):
     """
-    NEW: Direct scan without background thread (Selenium-Wire powered)
+    Starts scan using GET for scan_website_v2 (background, threaded, returns job_id)
     """
-    try:
-        result = scan_website_v2(str(url))
-        return {"status": "done", "result": result}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    job_id = str(uuid4())
+    jobs[job_id] = {"status": "pending", "result": None}
+    threading.Thread(target=background_scan_v2, args=(str(url), job_id, timeout)).start()
+    return {"job_id": job_id, "message": "v2 Scan started"}
 
 @app.get("/sexy_api/results/{job_id}")
 async def get_scan_result(job_id: str):
