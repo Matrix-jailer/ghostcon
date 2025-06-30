@@ -2,13 +2,17 @@ import os
 import time
 import re
 import selenium
-from typing import Optional
-from selenium import webdriver
+from seleniumwire import webdriver
+import tempfile  # Add this import
+from contextlib import contextmanager
+import undetected_chromedriver as uc
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from typing import Optional
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 from seleniumwire import webdriver
 from urllib.parse import urljoin
@@ -97,8 +101,11 @@ ignore_if_url_contains = [
 
 
 
+
+logger = logging.getLogger(__name__)
+
 def scan_website_v2(url, max_depth=2, timeout=None):
-    start_time=time.time()
+    start_time = time.time()
     visited = []
     content_hashes = []
     detected_gateways = []
@@ -138,19 +145,27 @@ def scan_website_v2(url, max_depth=2, timeout=None):
 
     def crawl_and_network():
         nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
-        logger.info(f"[Debug] Processing URL: {url}")
         driver = None
         try:
+            logger.info(f"[Debug] Processing URL: {url} with UDC")
             driver = create_selenium_wire_driver()
-            logger.info("[Debug] SeleniumWire driver initialized")
-            driver.get(url)
-            logger.info("[Debug] Page loaded successfully")
-            time.sleep(2)
+            logger.info("[Debug] UDC SeleniumWire driver initialized")
+            # Wait for page load to prevent hangs
+            try:
+                driver.get(url)
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                logger.info("[Debug] Page loaded successfully")
+            except TimeoutException as e:
+                logger.warning(f"[Debug] Page load timeout for {url}: {e}")
+                html = driver.page_source.lower()
+                if "cloudflare" in html or "please wait" in html or "checking your browser" in html:
+                    logger.info("[Debug] Cloudflare challenge detected, UDC should handle it")
+                raise TimeoutException(f"Page load failed for {url}")
+
             if timeout and time.time() - start_time > timeout:
                 logger.info("[Timeout] Reached timeout limit, stopping scan early.")
                 return
 
-            
             driver.execute_script("""
             window.__capturedFetches = [];
             const originalFetch = window.fetch;
@@ -205,7 +220,7 @@ def scan_website_v2(url, max_depth=2, timeout=None):
             for req in driver.requests:
                 if not req.response:
                     continue
-                req_url = req.url.lower()  # Avoid shadowing `url`
+                req_url = req.url.lower()
                 if any(bad in req_url for bad in ignore_if_url_contains):
                     continue
                 body = (req.body or b"").decode("utf-8", errors="ignore")
@@ -251,7 +266,7 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         finally:
             if driver:
                 driver.quit()
-                logger.info("[Debug] SeleniumWire driver closed")
+                logger.info("[Debug] UDC SeleniumWire driver closed")
 
     # Start both scraping and network inspection in parallel
     t1 = threading.Thread(target=crawl_and_scrape)
@@ -276,8 +291,6 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         "country": country_name,
         "ip": ip
     }
-
-
 # Payment gateways
 PAYMENT_GATEWAYS = [
     "stripe", "paypal", "paytm", "razorpay", "square", "adyen", "braintree",
@@ -536,26 +549,81 @@ def create_selenium_driver():
     driver.set_page_load_timeout(30)
     return driver
 
-def create_selenium_wire_driver():
-    from seleniumwire import webdriver
-    from selenium.webdriver.chrome.options import Options
 
+
+
+logger = logging.getLogger(__name__)
+
+@contextmanager
+def temp_chromedriver():
+    temp_driver = tempfile.NamedTemporaryFile(suffix='_chromedriver', delete=False)
+    temp_driver_path = temp_driver.name
+    temp_driver.close()
+    try:
+        os.system(f"cp /usr/local/bin/chromedriver {temp_driver_path}")
+        os.chmod(temp_driver_path, 0o755)
+        yield temp_driver_path
+    finally:
+        try:
+            os.unlink(temp_driver_path)
+            logger.debug(f"[Cleanup] Deleted temporary ChromeDriver: {temp_driver_path}")
+        except Exception as e:
+            logger.warning(f"[Cleanup Error] Failed to delete temp ChromeDriver {temp_driver_path}: {e}")
+
+def create_selenium_wire_driver():
     options = Options()
-    options.add_argument("--headless")
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
 
     seleniumwire_options = {
         'verify_ssl': False,
+        'enable_har': True,
+        'request_storage_base_dir': '/tmp/seleniumwire-storage',
         'timeout': 10,
+        'port': random.randint(49152, 65535)  # Use random high port to avoid conflicts
     }
 
-    return webdriver.Chrome(options=options, seleniumwire_options=seleniumwire_options)
-
-
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"[UDC] Initializing undetected-chromedriver with SeleniumWire (Attempt {attempt + 1}/{max_retries})")
+            with temp_chromedriver() as temp_driver_path:
+                driver = uc.Chrome(
+                    options=options,
+                    headless=True,
+                    driver_executable_path=temp_driver_path,
+                    version_main=138,
+                    seleniumwire_options=seleniumwire_options  # Pass SeleniumWire options directly
+                )
+                # Apply stealth settings
+                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": """
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                        window.navigator.chrome = { runtime: {} };
+                        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+                        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    """
+                })
+                # Verify network capture
+                try:
+                    driver.get("about:blank")
+                    driver.requests  # Test network capture
+                    logger.debug("[UDC] Network capture verified")
+                except Exception as e:
+                    logger.warning(f"[UDC] Network capture test failed: {e}")
+                logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
+                return driver
+        except Exception as e:
+            logger.error(f"[UDC Init Error] Failed to create driver on attempt {attempt + 1}: {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(1)  # Wait before retrying
 # Validate URL
 from urllib.parse import urlparse
 
@@ -608,7 +676,7 @@ def is_valid_url(url, base_domain):
 
 # Check URL status
 def check_url_status_selenium(url):
-    driver = create_selenium_driver()
+    driver = create_selenium_wire_driver()
     try:
         driver.set_page_load_timeout(10)
         driver.get(url)
@@ -619,25 +687,28 @@ def check_url_status_selenium(url):
     finally:
         driver.quit()
 
-# Fetch URL content
+
+
 def fetch_url_selenium(url, timeout=15):
     driver = None
     try:
-        driver = create_selenium_driver()
+        driver = create_selenium_wire_driver()
         driver.get(url)
-        # Wait until <body> tag is present or timeout
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         html_chunks = extract_deep_html(driver)
         combined_html = "\n".join(html_chunks)
         final_url = driver.current_url
-        final_url = driver.current_url
         return combined_html, final_url
     except (TimeoutException, WebDriverException) as e:
-        print(f"Selenium error fetching {url}: {e}")
+        logger.error(f"[Selenium Error] Fetching {url}: {e}")
         return "", url
     finally:
         if driver:
-            driver.quit()
+            try:
+                driver.quit()
+            except Exception as e:
+                logger.warning(f"[Selenium Quit Error] Failed to quit driver: {e}")
+
 
 def extract_deep_html(driver):
     html_chunks = []
@@ -992,25 +1063,7 @@ app = FastAPI()
 # In-memory job store
 jobs = {}
 
-# Placeholder for scan_website_v2 (assumed to be defined elsewhere)
-def scan_website_v2(url: str, timeout: Optional[int] = None) -> dict:
-    # This is a placeholder. Replace with actual implementation.
-    # Example: Perform a scan using Selenium-Wire and return results.
-    return {"success": True, "url": url, "data": "Scan results here"}
-
-def background_scan_v2(url: str, job_id: str, timeout: Optional[int] = None):
-    try:
-        result = scan_website_v2(url, timeout=timeout)
-        jobs[job_id]["status"] = "done"
-        jobs[job_id]["result"] = result
-    except Exception as e:
-        jobs[job_id]["status"] = "done"
-        jobs[job_id]["result"] = {"success": False, "error": f"Background task error: {str(e)}"}
-
-# v1 API (kept for compatibility, assuming scan_website is defined)
-def scan_website(url: str, max_depth: int = 1) -> dict:
-    # Placeholder for v1 scan function
-    return {"success": True, "url": url, "data": "v1 scan results"}
+# Your existing scan_website function must be defined above
 
 def background_scan(url: str, job_id: str):
     try:
@@ -1021,42 +1074,49 @@ def background_scan(url: str, job_id: str):
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = {"success": False, "error": f"Background task error: {str(e)}"}
 
-# v1 API Endpoint
+
 @app.get("/sexy_api/gate")
 async def start_scan_get(url: HttpUrl):
     """
-    Starts scan using GET (v1, useful for browsers)
+    Starts scan using GET (useful for browsers)
     """
     job_id = str(uuid4())
     jobs[job_id] = {"status": "pending", "result": None}
     threading.Thread(target=background_scan, args=(str(url), job_id)).start()
     return {"job_id": job_id, "message": "Scan started"}
 
-# v2 API Endpoint
-@app.get("/sexy_api/v2/gate")
-async def start_scan_v2_get(url: HttpUrl, timeout: Optional[int] = None):
-    """
-    Starts v2 scan using GET (Selenium-Wire powered, with optional timeout)
-    """
-    job_id = str(uuid4())
-    jobs[job_id] = {"status": "pending", "result": None}
-    threading.Thread(target=background_scan_v2, args=(str(url), job_id, timeout)).start()
-    return {"job_id": job_id, "message": "Scan started"}
-
-# Shared Results Endpoint
 @app.get("/sexy_api/results/{job_id}")
 async def get_scan_result(job_id: str):
-    """
-    Retrieves scan results for a given job ID (used by both v1 and v2)
-    """
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job ID not found")
     if jobs[job_id]["status"] != "done":
         return {"status": "pending"}
     return {"status": "done", "result": jobs[job_id]["result"]}
 
-# Run the server
+port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
+
+
+@app.get("/sexy_api/v2/gate")
+def scan_gateway_direct(url: HttpUrl, timeout: Optional[int] = None):
+    """
+    NEW: Direct scan without background thread (Selenium-Wire powered)
+    """
+    try:
+        result = scan_website_v2(str(url), timeout=timeout)
+        return {"status": "done", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/sexy_api/results/{job_id}")
+async def get_scan_result(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job ID not found")
+    if jobs[job_id]["status"] != "done":
+        return {"status": "pending"}
+    return {"status": "done", "result": jobs[job_id]["result"]}
+
 port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    import uvicorn
+    uvicorn.run("GhostAPIPRO:app", host="0.0.0.0", port=port)
