@@ -152,7 +152,8 @@ async def scan_website_v2(url, max_depth=2, timeout=None):
                         return
                     page = await context.new_page()
                     try:
-                        await page.goto(link, timeout=15000)
+                        await page.set_viewport_size({"width": 1280, "height": 800})
+                        await page.goto(link, timeout=15000, wait_until="domcontentloaded")
                         await asyncio.sleep(1)
                         html = await page.content()
                         tasks.append(process_async(html, link))
