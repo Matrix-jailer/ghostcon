@@ -2,17 +2,12 @@ import os
 import time
 import re
 import selenium
-from seleniumwire import webdriver
-import tempfile  # Add this import
-from contextlib import contextmanager
-import undetected_chromedriver as uc
+from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException, WebDriverException
-from typing import Optional
-from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.common.exceptions import WebDriverException
 from seleniumwire import webdriver
 from urllib.parse import urljoin
@@ -69,43 +64,10 @@ network_payment_url_keywords = [
     "/complete",  # e.g., /payment/complete
 ]
 
-ignore_if_url_contains = [
-    # Common asset/content folders
-    "wp-content", "wp-includes", "skin/frontend", "/assets/", "/themes/", "/static/", "/media/", "/images/", "/img/",
-
-    "https://facebook.com", "https://googlemanager.com", "https://static.klaviyo.com", "static.klaviyo.com", "https://content-autofill.googleapis.com",
-    "content-autofill.googleapis.com", "https://www.google.com", "https://googleads.g.doubleclick.net", "googleads.g.doubleclick.net", "googleads.g.doubleclick.net",
-    "https://www.googletagmanager.com", "googletagmanager.com", "https://www.googleadservices.com", "googleadservices.com", "https://fonts.googleapis.com",
-    "fonts.googleapis.com", "http://clients2.google.com", "clients2.google.com", "https://analytics.google.com", "hanalytics.google.com",
-    
-    # Analytics & marketing scripts
-    "googleapis", "gstatic", "googletagmanager", "google-analytics", "analytics", "doubleclick.net", 
-    "facebook.net", "fbcdn", "pixel.", "tiktokcdn", "matomo", "segment.io", "clarity.ms", "mouseflow", "hotjar", 
-    
-    # Fonts, icons, visual only
-    "fonts.", "fontawesome", ".woff", ".woff2", ".ttf", ".eot", ".otf", ".ico", ".svg",
-    
-    # CDN & framework scripts
-    "cdn.jsdelivr.net", "cloudflareinsights.com", "cdnjs", "bootstrapcdn", "polyfill.io", 
-    "jsdelivr.net", "unpkg.com", "yastatic.net", "akamai", "fastly", 
-    
-    # Media, tracking images
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".ico", 
-    
-    # Useless scripts/styles
-    ".css", ".scss", ".less", ".map", ".js", "main.js", "bundle.js", "common.js", "theme.js", "style.css", "custom.css",
-
-    # Other non-payment known paths
-    "/favicon", "/robots.txt", "/sitemap", "/manifest", "/rss", "/feed", "/help", "/support", "/about", "/terms", "/privacy",
-]
 
 
 
-
-logger = logging.getLogger(__name__)
-
-def scan_website_v2(url, max_depth=2, timeout=None):
-    start_time = time.time()
+def scan_website_v2(url, max_depth=2):
     visited = []
     content_hashes = []
     detected_gateways = []
@@ -132,80 +94,23 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         if gql == "True": graphql_detected = "True"
 
     def crawl_and_scrape():
-        if timeout and time.time() - start_time > timeout:
-            logger.info("[Timeout] Reached timeout limit, stopping scan early.")
-            return
         args = (url, max_depth, visited, content_hashes, base_domain, detected_gateways)
         results = crawl_worker(args)
         for html, page_url in results:
-            if timeout and time.time() - start_time > timeout:
-                logger.info("[Timeout] Scraper loop exited early during processing.")
-                return
             process(html, page_url)
 
     def crawl_and_network():
         nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
-        driver = None
+        driver = create_selenium_wire_driver()
         try:
-            logger.info(f"[Debug] Processing URL: {url} with UDC")
-            driver = create_selenium_wire_driver()
-            logger.info("[Debug] UDC SeleniumWire driver initialized")
-            # Wait for page load to prevent hangs
-            try:
-                driver.get(url)
-                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                logger.info("[Debug] Page loaded successfully")
-            except TimeoutException as e:
-                logger.warning(f"[Debug] Page load timeout for {url}: {e}")
-                html = driver.page_source.lower()
-                if "cloudflare" in html or "please wait" in html or "checking your browser" in html:
-                    logger.info("[Debug] Cloudflare challenge detected, UDC should handle it")
-                raise TimeoutException(f"Page load failed for {url}")
+            driver.get(url)
+            time.sleep(2)
 
-            if timeout and time.time() - start_time > timeout:
-                logger.info("[Timeout] Reached timeout limit, stopping scan early.")
-                return
-
-            driver.execute_script("""
-            window.__capturedFetches = [];
-            const originalFetch = window.fetch;
-            window.fetch = async function(...args) {
-                const response = await originalFetch(...args);
-                const clone = response.clone();
-                try {
-                    const bodyText = await clone.text();
-                    window.__capturedFetches.push({
-                        url: args[0],
-                        method: (args[1] && args[1].method) || 'GET',
-                        body: (args[1] && args[1].body) || '',
-                        response: bodyText
-                    });
-                } catch (e) {}
-                return response;
-            };
-            """)
-            time.sleep(4)
-
-            # Collect fetch logs
-            try:
-                fetch_logs = driver.execute_script("return window.__capturedFetches || []")
-                for entry in fetch_logs:
-                    combined = f"{entry['url']} {entry['body']} {entry['response']}".lower()
-                    gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined, entry['url'], detected_gateways)
-                    detected_gateways_set |= gw_set
-                    detected_3d |= tds
-                    detected_captcha |= cap
-                    detected_platforms |= plat
-                    detected_cards |= cards
-                    if cf: cf_detected = True
-                    if gql == "True": graphql_detected = "True"
-            except Exception as fetch_error:
-                logger.info(f"[Fetch Hook Error] {fetch_error}")
-
+            # 👇 Add scroll to bottom (optional lazy load trigger)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
 
-            # Click payment-related buttons
+            # 👇 Try to click any payment-related buttons
             try:
                 clickable_keywords = ["buy", "subscribe", "checkout", "payment", "plan", "join", "start"]
                 buttons = driver.find_elements(By.TAG_NAME, "button") + driver.find_elements(By.TAG_NAME, "a")
@@ -213,25 +118,22 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                     text = btn.text.strip().lower()
                     if any(kw in text for kw in clickable_keywords):
                         btn.click()
-                        time.sleep(3)
+                        time.sleep(3)  # Let it load checkout
             except Exception as click_err:
                 logger.info(f"[Click] No interactive buttons clicked: {click_err}")
+
 
             for req in driver.requests:
                 if not req.response:
                     continue
                 req_url = req.url.lower()
                 if any(bad in req_url for bad in ignore_if_url_contains):
-                    continue
+                    continue  # Skip non-relevant URLs early
                 body = (req.body or b"").decode("utf-8", errors="ignore")
                 combined_content = (req_url + " " + body).lower()
 
-                if (
-                    "client_secret" in combined_content or
-                    "publishable_key" in combined_content or
-                    "checkout.stripe.com" in combined_content or
-                    ("js.stripe.com" in combined_content and "stripe" in combined_content)
-                ):
+                # Match logic (unchanged)
+                if any(kw in combined_content for kw in ["pi_", "client_secret", "publishable_key", "checkout.stripe.com"]):
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
@@ -241,7 +143,8 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                     detected_cards |= cards
                     if cf: cf_detected = True
                     if gql == "True": graphql_detected = "True"
-                elif "paypal.com/sdk/js" in combined_content or "paypal" in req_url:
+
+                elif "paypal.com/sdk/js" in combined_content or "paypal" in req.url:
                     logger.info(f"[Net Gateway Match] PAYPAL-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
                     detected_gateways_set |= gw_set
@@ -251,9 +154,11 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                     detected_cards |= cards
                     if cf: cf_detected = True
                     if gql == "True": graphql_detected = "True"
-                elif any(p in req_url for p in network_payment_url_keywords):
+
+                elif any(p in req.url.lower() for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
+                    detected_gateways_set |= gw_set
                     detected_3d |= tds
                     detected_captcha |= cap
                     detected_platforms |= plat
@@ -262,11 +167,9 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                     if gql == "True": graphql_detected = "True"
 
         except Exception as e:
-            logger.error(f"[SeleniumWire Error] Exception for URL {url}: {e}")
+            print(f"[SeleniumWire Error] {e}")
         finally:
-            if driver:
-                driver.quit()
-                logger.info("[Debug] UDC SeleniumWire driver closed")
+            driver.quit()
 
     # Start both scraping and network inspection in parallel
     t1 = threading.Thread(target=crawl_and_scrape)
@@ -291,6 +194,10 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         "country": country_name,
         "ip": ip
     }
+
+
+
+
 # Payment gateways
 PAYMENT_GATEWAYS = [
     "stripe", "paypal", "paytm", "razorpay", "square", "adyen", "braintree",
@@ -375,7 +282,7 @@ THREE_D_SECURE_KEYWORDS = [re.compile(pattern, re.IGNORECASE) for pattern in [
 GATEWAY_KEYWORDS = {
     "stripe": [re.compile(pattern, re.IGNORECASE) for pattern in [
         r'stripe\.com', r'api\.stripe\.com/v1', r'js\.stripe\.com', r'stripe\.js', r'stripe\.min\.js',
-        r'client_secret', r'payment_intent', r'data-stripe', r'stripe-payment-element',
+        r'client_secret', r'pi_', r'payment_intent', r'data-stripe', r'stripe-payment-element',
         r'stripe-elements', r'stripe-checkout', r'hooks\.stripe\.com', r'm\.stripe\.network',
         r'stripe__input', r'stripe-card-element', r'stripe-v3ds', r'confirmCardPayment',
         r'createPaymentMethod', r'stripePublicKey', r'stripe\.handleCardAction',
@@ -512,9 +419,9 @@ PAYMENT_INDICATOR_REGEX = [
         "secure-payment", "pay-securely", "shop-secure", "give", "donate-now", "donatenow",
         "donate_now", "get-now", "browse", "category", "items", "product", "item",
         "giftcard", "topup", "plans", "buynow", "sell", "sell-now", "purchase-now",
-        "shopnow", "shopping", "menu", "games",
-        "sale", "vps", "server", "about", "about-us",
-        "cart-items", "buy-secure", "cart-page", "checkout-page",
+        "shopnow", "shopping", "menu", "games", "accessories", "men", "women",
+        "collections", "sale", "vps", "server", "about", "about-us", "shirt", "pant",
+        "hoodie", "keys", "cart-items", "buy-secure", "cart-page", "basket", "checkout-page",
         "order-summary", "payment-form", "purchase-flow", "shop-cart", "ecommerce", "store-cart",
         "buy-button", "purchase-button", "add-item", "remove-item", "cart-update",
         "apply-coupon", "redeem-code", "discount-code", "promo-code", "gift-card", "pay-with",
@@ -523,10 +430,10 @@ PAYMENT_INDICATOR_REGEX = [
 ]
 
 # Non-HTML extensions
-NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf', '.icon', '.img'}
+NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf'}
 
 # Skip domains
-SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com', 'https://facebook.com', 'https://googlemanager.com', 'https://static.klaviyo.com', 'static.klaviyo.com', 'https://content-autofill.googleapis.com', 'content-autofill.googleapis.com', 'https://www.google.com', 'https://googleads.g.doubleclick.net', 'googleads.g.doubleclick.net', 'googleads.g.doubleclick.net', 'https://www.googletagmanager.com', 'googletagmanager.com', 'https://www.googleadservices.com', 'googleadservices.com', 'https://fonts.googleapis.com', 'fonts.googleapis.com', 'http://clients2.google.com', 'clients2.google.com', 'https://analytics.google.com', 'hanalytics.google.com'}
+SKIP_DOMAINS = {'help.ko-fi.com', 'static.cloudflareinsights.com', 'twitter.com', 'facebook.com', 'youtube.com'}
 
 # User-Agent strings
 USER_AGENTS = [
@@ -549,81 +456,26 @@ def create_selenium_driver():
     driver.set_page_load_timeout(30)
     return driver
 
-
-
-
-logger = logging.getLogger(__name__)
-
-@contextmanager
-def temp_chromedriver():
-    temp_driver = tempfile.NamedTemporaryFile(suffix='_chromedriver', delete=False)
-    temp_driver_path = temp_driver.name
-    temp_driver.close()
-    try:
-        os.system(f"cp /usr/local/bin/chromedriver {temp_driver_path}")
-        os.chmod(temp_driver_path, 0o755)
-        yield temp_driver_path
-    finally:
-        try:
-            os.unlink(temp_driver_path)
-            logger.debug(f"[Cleanup] Deleted temporary ChromeDriver: {temp_driver_path}")
-        except Exception as e:
-            logger.warning(f"[Cleanup Error] Failed to delete temp ChromeDriver {temp_driver_path}: {e}")
-
 def create_selenium_wire_driver():
+    from seleniumwire import webdriver
+    from selenium.webdriver.chrome.options import Options
+
     options = Options()
-    options.add_argument("--headless=new")
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
 
     seleniumwire_options = {
         'verify_ssl': False,
-        'enable_har': True,
-        'request_storage_base_dir': '/tmp/seleniumwire-storage',
         'timeout': 10,
-        'port': random.randint(49152, 65535)  # Use random high port to avoid conflicts
     }
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"[UDC] Initializing undetected-chromedriver with SeleniumWire (Attempt {attempt + 1}/{max_retries})")
-            with temp_chromedriver() as temp_driver_path:
-                driver = uc.Chrome(
-                    options=options,
-                    headless=True,
-                    driver_executable_path=temp_driver_path,
-                    version_main=138,
-                    seleniumwire_options=seleniumwire_options  # Pass SeleniumWire options directly
-                )
-                # Apply stealth settings
-                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                    "source": """
-                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                        window.navigator.chrome = { runtime: {} };
-                        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-                        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-                    """
-                })
-                # Verify network capture
-                try:
-                    driver.get("about:blank")
-                    driver.requests  # Test network capture
-                    logger.debug("[UDC] Network capture verified")
-                except Exception as e:
-                    logger.warning(f"[UDC] Network capture test failed: {e}")
-                logger.info("[UDC] Undetected Chrome initialized with SeleniumWire")
-                return driver
-        except Exception as e:
-            logger.error(f"[UDC Init Error] Failed to create driver on attempt {attempt + 1}: {e}")
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(1)  # Wait before retrying
+    return webdriver.Chrome(options=options, seleniumwire_options=seleniumwire_options)
+
+
 # Validate URL
 from urllib.parse import urlparse
 
@@ -676,7 +528,7 @@ def is_valid_url(url, base_domain):
 
 # Check URL status
 def check_url_status_selenium(url):
-    driver = create_selenium_wire_driver()
+    driver = create_selenium_driver()
     try:
         driver.set_page_load_timeout(10)
         driver.get(url)
@@ -687,72 +539,23 @@ def check_url_status_selenium(url):
     finally:
         driver.quit()
 
-
-
+# Fetch URL content
 def fetch_url_selenium(url, timeout=15):
     driver = None
     try:
-        driver = create_selenium_wire_driver()
+        driver = create_selenium_driver()
         driver.get(url)
+        # Wait until <body> tag is present or timeout
         WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        html_chunks = extract_deep_html(driver)
-        combined_html = "\n".join(html_chunks)
+        page_source = driver.page_source
         final_url = driver.current_url
-        return combined_html, final_url
+        return page_source, final_url
     except (TimeoutException, WebDriverException) as e:
-        logger.error(f"[Selenium Error] Fetching {url}: {e}")
+        print(f"Selenium error fetching {url}: {e}")
         return "", url
     finally:
         if driver:
-            try:
-                driver.quit()
-            except Exception as e:
-                logger.warning(f"[Selenium Quit Error] Failed to quit driver: {e}")
-
-
-def extract_deep_html(driver):
-    html_chunks = []
-
-    # Add main page HTML
-    try:
-        html_chunks.append(driver.page_source)
-    except Exception as e:
-        logger.warning(f"[Deep HTML] Failed to get main page HTML: {e}")
-
-    # Extract iframe content
-    try:
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        for i, iframe in enumerate(iframes):
-            try:
-                driver.switch_to.frame(iframe)
-                html_chunks.append(driver.page_source)
-                driver.switch_to.default_content()
-            except Exception as e:
-                logger.info(f"[Deep HTML] Failed to access iframe #{i}: {e}")
-                driver.switch_to.default_content()
-    except Exception as e:
-        logger.warning(f"[Deep HTML] Error iterating iframes: {e}")
-
-    # Shadow DOMs (basic attempt)
-    try:
-        shadow_roots = driver.execute_script("""
-            let shadows = [];
-            function deepSearch(el) {
-                if (!el || !el.shadowRoot) return;
-                shadows.push(el.shadowRoot.innerHTML);
-                el.shadowRoot.querySelectorAll('*').forEach(deepSearch);
-            }
-            document.querySelectorAll('*').forEach(el => {
-                if (el.shadowRoot) deepSearch(el);
-            });
-            return shadows;
-        """)
-        html_chunks.extend(shadow_roots or [])
-    except Exception as e:
-        logger.warning(f"[Deep HTML] Failed to read Shadow DOMs: {e}")
-
-    return html_chunks
-    
+            driver.quit()
 
 
 def extract_links_from_buttons_and_anchors(html, base_url):
@@ -1097,12 +900,12 @@ port = int(os.environ.get("PORT", 8000))  # 8000 fallback for local dev
 
 
 @app.get("/sexy_api/v2/gate")
-def scan_gateway_direct(url: HttpUrl, timeout: Optional[int] = None):
+def scan_gateway_direct(url: HttpUrl):
     """
     NEW: Direct scan without background thread (Selenium-Wire powered)
     """
     try:
-        result = scan_website_v2(str(url), timeout=timeout)
+        result = scan_website_v2(str(url))
         return {"status": "done", "result": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
