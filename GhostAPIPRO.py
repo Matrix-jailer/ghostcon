@@ -1,6 +1,7 @@
 import os
 import time
 import re
+import asyncio
 import selenium
 from typing import Optional
 from selenium import webdriver
