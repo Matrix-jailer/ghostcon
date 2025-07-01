@@ -106,6 +106,10 @@ from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Manager
 import socket  # Ensure socket is imported for get_ip
 
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Manager
+import socket  # Ensure socket is imported for get_ip
+
 def scan_website_v2(url, max_depth=2, timeout=None):
     start_time = time.time()
     # Use Manager for thread-safe shared data
@@ -113,7 +117,7 @@ def scan_website_v2(url, max_depth=2, timeout=None):
     visited = manager.list()
     content_hashes = manager.list()
     detected_gateways = manager.list()
-    detected_gateways_list = manager.list()  # Use list instead of set
+    detected_gateways_list = manager.list()  # Thread-safe list for gateways
     detected_3d_list = manager.list()
     detected_captcha_list = manager.list()
     detected_platforms_list = manager.list()
@@ -124,21 +128,19 @@ def scan_website_v2(url, max_depth=2, timeout=None):
 
     def process(html, page_url):
         """Process HTML content for feature detection (thread-safe)."""
-        gw_set, tds, captcha, platforms, cf, cards, gql = detect_features(html, page_url, detected_gateways)
-        with detected_gateways_list._lock:  # Thread-safe updates
-            detected_gateways_list.extend(gw_set)
-        with detected_3d_list._lock:
+        try:
+            gw_set, tds, captcha, platforms, cf, cards, gql = detect_features(html, page_url, detected_gateways)
+            detected_gateways_list.extend(gw_set)  # No _lock needed
             detected_3d_list.extend(tds)
-        with detected_captcha_list._lock:
             detected_captcha_list.extend(captcha)
-        with detected_platforms_list._lock:
             detected_platforms_list.extend(platforms)
-        with detected_cards_list._lock:
             detected_cards_list.extend(cards)
-        if cf:
-            cf_detected.value = True
-        if gql == "True":
-            graphql_detected.value = "True"
+            if cf:
+                cf_detected.value = True
+            if gql == "True":
+                graphql_detected.value = "True"
+        except Exception as e:
+            logger.error(f"[Process Error] Failed to process page {page_url}: {e}")
 
     def crawl_and_scrape():
         """Crawl pages and process them concurrently."""
@@ -200,16 +202,11 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 for entry in fetch_logs:
                     combined = f"{entry['url']} {entry['body']} {entry['response']}".lower()
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined, entry['url'], detected_gateways)
-                    with detected_gateways_list._lock:
-                        detected_gateways_list.extend(gw_set)
-                    with detected_3d_list._lock:
-                        detected_3d_list.extend(tds)
-                    with detected_captcha_list._lock:
-                        detected_captcha_list.extend(cap)
-                    with detected_platforms_list._lock:
-                        detected_platforms_list.extend(plat)
-                    with detected_cards_list._lock:
-                        detected_cards_list.extend(cards)
+                    detected_gateways_list.extend(gw_set)
+                    detected_3d_list.extend(tds)
+                    detected_captcha_list.extend(cap)
+                    detected_platforms_list.extend(plat)
+                    detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -223,14 +220,35 @@ def scan_website_v2(url, max_depth=2, timeout=None):
             # Click payment-related buttons
             try:
                 clickable_keywords = ["buy", "subscribe", "checkout", "payment", "plan", "join", "start"]
-                buttons = driver.find_elements(By.TAG_NAME, "button") + driver.find_elements(By.TAG_NAME, "a")
-                for btn in buttons:
-                    text = btn.text.strip().lower()
-                    if any(kw in text for kw in clickable_keywords):
-                        btn.click()
-                        time.sleep(3)
+                max_clicks = 5
+                click_count = 0
+                elements = driver.find_elements(By.CSS_SELECTOR, "button, a")
+                for _ in range(max_clicks):
+                    if click_count >= max_clicks or (timeout and time.time() - start_time > timeout):
+                        break
+                    for element in elements:
+                        try:
+                            element = WebDriverWait(driver, 5).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "button, a"))
+                            )
+                            text = element.text.strip().lower()
+                            if any(kw in text for kw in clickable_keywords):
+                                element.click()
+                                logger.info(f"[Click] Clicked element with text: {text}")
+                                click_count += 1
+                                time.sleep(3)
+                                elements = driver.find_elements(By.CSS_SELECTOR, "button, a")
+                                break
+                        except (StaleElementReferenceException, TimeoutException):
+                            logger.debug(f"[Click] Stale or non-clickable element, skipping")
+                            continue
+                        except Exception as click_err:
+                            logger.info(f"[Click] Error clicking element: {click_err}")
+                            continue
+                    else:
+                        break
             except Exception as click_err:
-                logger.info(f"[Click] No interactive buttons clicked: {click_err}")
+                logger.info(f"[Click] Failed to process clickable elements: {click_err}")
 
             for req in driver.requests:
                 if not req.response:
@@ -249,16 +267,11 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 ):
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    with detected_gateways_list._lock:
-                        detected_gateways_list.extend(gw_set)
-                    with detected_3d_list._lock:
-                        detected_3d_list.extend(tds)
-                    with detected_captcha_list._lock:
-                        detected_captcha_list.extend(cap)
-                    with detected_platforms_list._lock:
-                        detected_platforms_list.extend(plat)
-                    with detected_cards_list._lock:
-                        detected_cards_list.extend(cards)
+                    detected_gateways_list.extend(gw_set)
+                    detected_3d_list.extend(tds)
+                    detected_captcha_list.extend(cap)
+                    detected_platforms_list.extend(plat)
+                    detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -266,16 +279,11 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 elif "paypal.com/sdk/js" in combined_content or "paypal" in req_url:
                     logger.info(f"[Net Gateway Match] PAYPAL-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    with detected_gateways_list._lock:
-                        detected_gateways_list.extend(gw_set)
-                    with detected_3d_list._lock:
-                        detected_3d_list.extend(tds)
-                    with detected_captcha_list._lock:
-                        detected_captcha_list.extend(cap)
-                    with detected_platforms_list._lock:
-                        detected_platforms_list.extend(plat)
-                    with detected_cards_list._lock:
-                        detected_cards_list.extend(cards)
+                    detected_gateways_list.extend(gw_set)
+                    detected_3d_list.extend(tds)
+                    detected_captcha_list.extend(cap)
+                    detected_platforms_list.extend(plat)
+                    detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -283,14 +291,11 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 elif any(p in req_url for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    with detected_3d_list._lock:
-                        detected_3d_list.extend(tds)
-                    with detected_captcha_list._lock:
-                        detected_captcha_list.extend(cap)
-                    with detected_platforms_list._lock:
-                        detected_platforms_list.extend(plat)
-                    with detected_cards_list._lock:
-                        detected_cards_list.extend(cards)
+                    detected_gateways_list.extend(gw_set)
+                    detected_3d_list.extend(tds)
+                    detected_captcha_list.extend(cap)
+                    detected_platforms_list.extend(plat)
+                    detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -333,7 +338,6 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         "country": country_name,
         "ip": ip
     }
-
 
 # Payment gateways
 PAYMENT_GATEWAYS = [
