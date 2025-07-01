@@ -293,7 +293,7 @@ async def scan_website_v2(url, max_depth=2, timeout=None):
 
     ip = get_ip(base_domain)
     country_name = get_country_from_tld_or_ip(url, ip)
-
+    logger.info(f"[Final Results] GW: {detected_gateways_set} | CAPTCHA: {detected_captcha} | Platforms: {detected_platforms}")
     return {
         "url": url,
         "payment_gateways": sorted(detected_gateways_set),
@@ -820,7 +820,7 @@ def detect_features(html_content, file_url, detected_gateways):
                 logger.info(f"Matched pattern '{pattern.pattern}' for {gateway} in {file_url}")
 
         gateway_name = gateway.capitalize()
-        already_detected = gateway_name in detected_gateways
+        already_detected = any(gateway_name.lower() in gw.lower() for gw in detected_gateways)
 
         if (len(matches) >= 2 or any(sig in matches for sig in [p.pattern for p in gateway_keywords])) and not already_detected:
             detected_gateways_set.add(gateway_name)
