@@ -3,6 +3,9 @@ import time
 import re
 import selenium
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Manager
+import socket
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -97,47 +100,65 @@ ignore_if_url_contains = [
 
 
 
+
+
 def scan_website_v2(url, max_depth=2, timeout=None):
-    start_time=time.time()
-    visited = []
-    content_hashes = []
-    detected_gateways = []
-
-    detected_gateways_set = set()
-    detected_3d = set()
-    detected_captcha = set()
-    detected_platforms = set()
-    cf_detected = False
-    detected_cards = set()
-    graphql_detected = "False"
-
+    start_time = time.time()
+    # Use Manager for thread-safe shared data
+    manager = Manager()
+    visited = manager.list()
+    content_hashes = manager.list()
+    detected_gateways = manager.list()
+    detected_gateways_set = manager.set()
+    detected_3d = manager.set()
+    detected_captcha = manager.set()
+    detected_platforms = manager.set()
+    detected_cards = manager.set()
+    cf_detected = manager.Value('b', False)  # Boolean for Cloudflare
+    graphql_detected = manager.Value('c', "False")  # String for GraphQL
     base_domain = urlparse(url).netloc
 
     def process(html, page_url):
-        nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
+        """Process HTML content for feature detection (thread-safe)."""
         gw_set, tds, captcha, platforms, cf, cards, gql = detect_features(html, page_url, detected_gateways)
-        detected_gateways_set |= gw_set
-        detected_3d |= tds
-        detected_captcha |= captcha
-        detected_platforms |= platforms
-        detected_cards |= cards
-        if cf: cf_detected = True
-        if gql == "True": graphql_detected = "True"
+        with detected_gateways_set._lock:  # Thread-safe updates
+            detected_gateways_set.update(gw_set)
+        with detected_3d._lock:
+            detected_3d.update(tds)
+        with detected_captcha._lock:
+            detected_captcha.update(captcha)
+        with detected_platforms._lock:
+            detected_platforms.update(platforms)
+        with detected_cards._lock:
+            detected_cards.update(cards)
+        if cf:
+            cf_detected.value = True
+        if gql == "True":
+            graphql_detected.value = "True"
 
     def crawl_and_scrape():
+        """Crawl pages and process them concurrently."""
         if timeout and time.time() - start_time > timeout:
             logger.info("[Timeout] Reached timeout limit, stopping scan early.")
             return
         args = (url, max_depth, visited, content_hashes, base_domain, detected_gateways)
-        results = crawl_worker(args)
-        for html, page_url in results:
-            if timeout and time.time() - start_time > timeout:
-                logger.info("[Timeout] Scraper loop exited early during processing.")
-                return
-            process(html, page_url)
+        results = crawl_worker(args)  # Collect all HTML and URLs
+        if not results:
+            logger.info("[Crawl] No results from crawl_worker.")
+            return
+
+        # Process all HTML content concurrently using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=8) as executor:  # Adjust max_workers as needed
+            futures = [executor.submit(process, html, page_url) for html, page_url in results
+                       if not (timeout and time.time() - start_time > timeout)]
+            for future in futures:
+                try:
+                    future.result()  # Wait for all tasks to complete
+                except Exception as e:
+                    logger.error(f"[Process Error] Failed to process page: {e}")
 
     def crawl_and_network():
-        nonlocal detected_gateways_set, detected_3d, detected_captcha, detected_platforms, cf_detected, detected_cards, graphql_detected
+        nonlocal cf_detected, graphql_detected
         logger.info(f"[Debug] Processing URL: {url}")
         driver = None
         try:
@@ -150,7 +171,6 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 logger.info("[Timeout] Reached timeout limit, stopping scan early.")
                 return
 
-            
             driver.execute_script("""
             window.__capturedFetches = [];
             const originalFetch = window.fetch;
@@ -177,13 +197,20 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 for entry in fetch_logs:
                     combined = f"{entry['url']} {entry['body']} {entry['response']}".lower()
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined, entry['url'], detected_gateways)
-                    detected_gateways_set |= gw_set
-                    detected_3d |= tds
-                    detected_captcha |= cap
-                    detected_platforms |= plat
-                    detected_cards |= cards
-                    if cf: cf_detected = True
-                    if gql == "True": graphql_detected = "True"
+                    with detected_gateways_set._lock:
+                        detected_gateways_set.update(gw_set)
+                    with detected_3d._lock:
+                        detected_3d.update(tds)
+                    with detected_captcha._lock:
+                        detected_captcha.update(cap)
+                    with detected_platforms._lock:
+                        detected_platforms.update(plat)
+                    with detected_cards._lock:
+                        detected_cards.update(cards)
+                    if cf:
+                        cf_detected.value = True
+                    if gql == "True":
+                        graphql_detected.value = "True"
             except Exception as fetch_error:
                 logger.info(f"[Fetch Hook Error] {fetch_error}")
 
@@ -205,7 +232,7 @@ def scan_website_v2(url, max_depth=2, timeout=None):
             for req in driver.requests:
                 if not req.response:
                     continue
-                req_url = req.url.lower()  # Avoid shadowing `url`
+                req_url = req.url.lower()
                 if any(bad in req_url for bad in ignore_if_url_contains):
                     continue
                 body = (req.body or b"").decode("utf-8", errors="ignore")
@@ -218,33 +245,53 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                     ("js.stripe.com" in combined_content and "stripe" in combined_content)
                 ):
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
-                    gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    detected_gateways_set |= gw_set
-                    detected_3d |= tds
-                    detected_captcha |= cap
-                    detected_platforms |= plat
-                    detected_cards |= cards
-                    if cf: cf_detected = True
-                    if gql == "True": graphql_detected = "True"
+                    gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gaterocks)
+                    with detected_gateways_set._lock:
+                        detected_gateways_set.update(gw_set)
+                    with detected_3d._lock:
+                        detected_3d.update(tds)
+                    with detected_captcha._lock:
+                        detected_captcha.update(cap)
+                    with detected_platforms._lock:
+                        detected_platforms.update(plat)
+                    with detected_cards._lock:
+                        detected_cards.update(cards)
+                    if cf:
+                        cf_detected.value = True
+                    if gql == "True":
+                        graphql_detected.value = "True"
                 elif "paypal.com/sdk/js" in combined_content or "paypal" in req_url:
                     logger.info(f"[Net Gateway Match] PAYPAL-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    detected_gateways_set |= gw_set
-                    detected_3d |= tds
-                    detected_captcha |= cap
-                    detected_platforms |= plat
-                    detected_cards |= cards
-                    if cf: cf_detected = True
-                    if gql == "True": graphql_detected = "True"
+                    with detected_gateways_set._lock:
+                        detected_gateways_set.update(gw_set)
+                    with detected_3d._lock:
+                        detected_3d.update(tds)
+                    with detected_captcha._lock:
+                        detected_captcha.update(cap)
+                    with detected_platforms._lock:
+                        detected_platforms.update(plat)
+                    with detected_cards._lock:
+                        detected_cards.update(cards)
+                    if cf:
+                        cf_detected.value = True
+                    if gql == "True":
+                        graphql_detected.value = "True"
                 elif any(p in req_url for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    detected_3d |= tds
-                    detected_captcha |= cap
-                    detected_platforms |= plat
-                    detected_cards |= cards
-                    if cf: cf_detected = True
-                    if gql == "True": graphql_detected = "True"
+                    with detected_3d._lock:
+                        detected_3d.update(tds)
+                    with detected_captcha._lock:
+                        detected_captcha.update(cap)
+                    with detected_platforms._lock:
+                        detected_platforms.update(plat)
+                    with detected_cards._lock:
+                        detected_cards.update(cards)
+                    if cf:
+                        cf_detected.value = True
+                    if gql == "True":
+                        graphql_detected.value = "True"
 
         except Exception as e:
             logger.error(f"[SeleniumWire Error] Exception for URL {url}: {e}")
@@ -270,8 +317,8 @@ def scan_website_v2(url, max_depth=2, timeout=None):
         "3d_secure": sorted(detected_3d),
         "captcha": sorted(detected_captcha),
         "platforms": sorted(detected_platforms),
-        "cloudflare": cf_detected,
-        "graphql": graphql_detected,
+        "cloudflare": cf_detected.value,
+        "graphql": graphql_detected.value,
         "cards": sorted(detected_cards),
         "country": country_name,
         "ip": ip
