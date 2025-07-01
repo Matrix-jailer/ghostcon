@@ -102,6 +102,10 @@ ignore_if_url_contains = [
 
 
 
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Manager
+import socket  # Ensure socket is imported for get_ip
+
 def scan_website_v2(url, max_depth=2, timeout=None):
     start_time = time.time()
     # Use Manager for thread-safe shared data
@@ -109,11 +113,11 @@ def scan_website_v2(url, max_depth=2, timeout=None):
     visited = manager.list()
     content_hashes = manager.list()
     detected_gateways = manager.list()
-    detected_gateways_set = manager.set()
-    detected_3d = manager.set()
-    detected_captcha = manager.set()
-    detected_platforms = manager.set()
-    detected_cards = manager.set()
+    detected_gateways_list = manager.list()  # Use list instead of set
+    detected_3d_list = manager.list()
+    detected_captcha_list = manager.list()
+    detected_platforms_list = manager.list()
+    detected_cards_list = manager.list()
     cf_detected = manager.Value('b', False)  # Boolean for Cloudflare
     graphql_detected = manager.Value('c', "False")  # String for GraphQL
     base_domain = urlparse(url).netloc
@@ -121,16 +125,16 @@ def scan_website_v2(url, max_depth=2, timeout=None):
     def process(html, page_url):
         """Process HTML content for feature detection (thread-safe)."""
         gw_set, tds, captcha, platforms, cf, cards, gql = detect_features(html, page_url, detected_gateways)
-        with detected_gateways_set._lock:  # Thread-safe updates
-            detected_gateways_set.update(gw_set)
-        with detected_3d._lock:
-            detected_3d.update(tds)
-        with detected_captcha._lock:
-            detected_captcha.update(captcha)
-        with detected_platforms._lock:
-            detected_platforms.update(platforms)
-        with detected_cards._lock:
-            detected_cards.update(cards)
+        with detected_gateways_list._lock:  # Thread-safe updates
+            detected_gateways_list.extend(gw_set)
+        with detected_3d_list._lock:
+            detected_3d_list.extend(tds)
+        with detected_captcha_list._lock:
+            detected_captcha_list.extend(captcha)
+        with detected_platforms_list._lock:
+            detected_platforms_list.extend(platforms)
+        with detected_cards_list._lock:
+            detected_cards_list.extend(cards)
         if cf:
             cf_detected.value = True
         if gql == "True":
@@ -158,7 +162,6 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                     logger.error(f"[Process Error] Failed to process page: {e}")
 
     def crawl_and_network():
-        nonlocal cf_detected, graphql_detected
         logger.info(f"[Debug] Processing URL: {url}")
         driver = None
         try:
@@ -197,16 +200,16 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 for entry in fetch_logs:
                     combined = f"{entry['url']} {entry['body']} {entry['response']}".lower()
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined, entry['url'], detected_gateways)
-                    with detected_gateways_set._lock:
-                        detected_gateways_set.update(gw_set)
-                    with detected_3d._lock:
-                        detected_3d.update(tds)
-                    with detected_captcha._lock:
-                        detected_captcha.update(cap)
-                    with detected_platforms._lock:
-                        detected_platforms.update(plat)
-                    with detected_cards._lock:
-                        detected_cards.update(cards)
+                    with detected_gateways_list._lock:
+                        detected_gateways_list.extend(gw_set)
+                    with detected_3d_list._lock:
+                        detected_3d_list.extend(tds)
+                    with detected_captcha_list._lock:
+                        detected_captcha_list.extend(cap)
+                    with detected_platforms_list._lock:
+                        detected_platforms_list.extend(plat)
+                    with detected_cards_list._lock:
+                        detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -245,17 +248,17 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                     ("js.stripe.com" in combined_content and "stripe" in combined_content)
                 ):
                     logger.info(f"[Net Gateway Match] STRIPE-like signal in {req.url}")
-                    gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gaterocks)
-                    with detected_gateways_set._lock:
-                        detected_gateways_set.update(gw_set)
-                    with detected_3d._lock:
-                        detected_3d.update(tds)
-                    with detected_captcha._lock:
-                        detected_captcha.update(cap)
-                    with detected_platforms._lock:
-                        detected_platforms.update(plat)
-                    with detected_cards._lock:
-                        detected_cards.update(cards)
+                    gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
+                    with detected_gateways_list._lock:
+                        detected_gateways_list.extend(gw_set)
+                    with detected_3d_list._lock:
+                        detected_3d_list.extend(tds)
+                    with detected_captcha_list._lock:
+                        detected_captcha_list.extend(cap)
+                    with detected_platforms_list._lock:
+                        detected_platforms_list.extend(plat)
+                    with detected_cards_list._lock:
+                        detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -263,16 +266,16 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 elif "paypal.com/sdk/js" in combined_content or "paypal" in req_url:
                     logger.info(f"[Net Gateway Match] PAYPAL-like signal in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    with detected_gateways_set._lock:
-                        detected_gateways_set.update(gw_set)
-                    with detected_3d._lock:
-                        detected_3d.update(tds)
-                    with detected_captcha._lock:
-                        detected_captcha.update(cap)
-                    with detected_platforms._lock:
-                        detected_platforms.update(plat)
-                    with detected_cards._lock:
-                        detected_cards.update(cards)
+                    with detected_gateways_list._lock:
+                        detected_gateways_list.extend(gw_set)
+                    with detected_3d_list._lock:
+                        detected_3d_list.extend(tds)
+                    with detected_captcha_list._lock:
+                        detected_captcha_list.extend(cap)
+                    with detected_platforms_list._lock:
+                        detected_platforms_list.extend(plat)
+                    with detected_cards_list._lock:
+                        detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -280,14 +283,14 @@ def scan_website_v2(url, max_depth=2, timeout=None):
                 elif any(p in req_url for p in network_payment_url_keywords):
                     logger.info(f"[Net Gateway Signal] Generic payment activity in {req.url}")
                     gw_set, tds, cap, plat, cf, cards, gql = detect_features(combined_content, req.url, detected_gateways)
-                    with detected_3d._lock:
-                        detected_3d.update(tds)
-                    with detected_captcha._lock:
-                        detected_captcha.update(cap)
-                    with detected_platforms._lock:
-                        detected_platforms.update(plat)
-                    with detected_cards._lock:
-                        detected_cards.update(cards)
+                    with detected_3d_list._lock:
+                        detected_3d_list.extend(tds)
+                    with detected_captcha_list._lock:
+                        detected_captcha_list.extend(cap)
+                    with detected_platforms_list._lock:
+                        detected_platforms_list.extend(plat)
+                    with detected_cards_list._lock:
+                        detected_cards_list.extend(cards)
                     if cf:
                         cf_detected.value = True
                     if gql == "True":
@@ -307,6 +310,13 @@ def scan_website_v2(url, max_depth=2, timeout=None):
     t2.start()
     t1.join()
     t2.join()
+
+    # Convert lists to sets to remove duplicates
+    detected_gateways_set = set(detected_gateways_list)
+    detected_3d = set(detected_3d_list)
+    detected_captcha = set(detected_captcha_list)
+    detected_platforms = set(detected_platforms_list)
+    detected_cards = set(detected_cards_list)
 
     ip = get_ip(base_domain)
     country_name = get_country_from_tld_or_ip(url, ip)
