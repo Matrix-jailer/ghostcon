@@ -827,13 +827,14 @@ def detect_features(html_content, file_url, detected_gateways):
         gateway_name = gateway.capitalize()
         already_detected = any(gateway_name.lower() in gw.lower() for gw in detected_gateways)
 
-        if (len(matches) >= 2 or any(sig in matches for sig in [p.pattern for p in gateway_keywords])) and not already_detected:
-            detected_gateways_set.add(gateway_name)
-            detected_gateways.append(gateway_name)
-        elif len(matches) == 1 and not already_detected:
-            low_cred = f"{gateway_name} ⚠️ Low Credibility"
-            detected_gateways_set.add(low_cred)
-            detected_gateways.append(low_cred)
+        if not already_detected and matches:
+            if len(matches) >= 2:
+                detected_gateways_set.add(gateway_name)
+                detected_gateways.append(gateway_name)
+            else:
+                low_cred = f"{gateway_name} ⚠️ Low Credibility"
+                detected_gateways_set.add(low_cred)
+                detected_gateways.append(low_cred)
             
             for tds_pattern in THREE_D_SECURE_KEYWORDS:
                 if tds_pattern.search(content_lower):
