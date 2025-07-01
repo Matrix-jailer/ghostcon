@@ -780,7 +780,7 @@ def detect_features(html_content, file_url, detected_gateways):
             detected_gateways_set.add(gateway_name)
             detected_gateways.append(gateway_name)
         elif len(matches) == 1 and not already_detected:
-            low_cred = f"{gateway_name} 鈿狅笍 Low Credibility"
+            low_cred = f"{gateway_name} ⚠️ Low Credibility"
             detected_gateways_set.add(low_cred)
             detected_gateways.append(low_cred)
             
@@ -795,7 +795,7 @@ def detect_features(html_content, file_url, detected_gateways):
     # Captchas
     for category, patterns in CAPTCHA_PATTERNS.items():
         if any(re.search(pattern, content_lower, re.IGNORECASE) for pattern in patterns):
-            detected_captcha.add(f"{category} Found 馃敀")
+            detected_captcha.add(f"{category} Found 🔒")
 
     # Platforms
     for keyword, name in PLATFORM_KEYWORDS.items():
@@ -954,16 +954,16 @@ def scan_website(url: str, max_depth: int = 2) -> dict:
         country_name = get_country_from_tld_or_ip(url, ip_address)
 
         result = (
-            f"馃煝 Scan Results for {url}\n"
-            f"鈴憋笍 Time Taken: {elapsed} seconds\n"
-            f"馃挸 Payment Gateways: {', '.join(sorted(detected_gateways_set)) if detected_gateways_set else 'None'}\n"
-            f"馃敀 Captcha: {', '.join(sorted(detected_captcha)) if detected_captcha else 'Not Found 馃コ'}\n"
-            f"馃洝锔� Cloudflare: {'Found 馃敀' if cf_detected else 'Not Found 馃コ'}\n"
-            f"馃搳 GraphQL: {graphql_detected}\n"
-            f"馃枼锔� Platforms: {', '.join(sorted(detected_platforms)) if detected_platforms else 'Unknown'}\n"
-            f"馃實 Country: {country_name}\n"
-            f"馃攼 3D Secure: {'ENABLED' if detected_3d else 'DISABLED'}\n"
-            f"馃挸 Cards: {', '.join(sorted(detected_cards)) if detected_cards else 'None'}"
+            f"🟢 Scan Results for {url}\n"
+            f"⏱️ Time Taken: {elapsed} seconds\n"
+            f"💳 Payment Gateways: {', '.join(sorted(detected_gateways_set)) if detected_gateways_set else 'None'}\n"
+            f"🔒 Captcha: {', '.join(sorted(detected_captcha)) if detected_captcha else 'Not Found 🥳'}\n"
+            f"🛡️ Cloudflare: {'Found 🔒' if cf_detected else 'Not Found 🥳'}\n"
+            f"📊 GraphQL: {graphql_detected}\n"
+            f"🖥️ Platforms: {', '.join(sorted(detected_platforms)) if detected_platforms else 'Unknown'}\n"
+            f"🌍 Country: {country_name}\n"
+            f"🔐 3D Secure: {'ENABLED' if detected_3d else 'DISABLED'}\n"
+            f"💳 Cards: {', '.join(sorted(detected_cards)) if detected_cards else 'None'}"
         )
 
         return {
