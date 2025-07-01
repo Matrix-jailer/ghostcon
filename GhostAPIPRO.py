@@ -222,15 +222,20 @@ async def scan_website_v2(url, max_depth=2, timeout=None):
             time.sleep(2)
 
             try:
-                clickable_keywords = ["buy", "subscribe", "checkout", "payment", "plan", "join", "start"]
+                clickable_keywords = ["buy", "buy now", "purchase", "checkout", "pay", "payment", "subscribe", "add to cart", "add to bag", "add to basket", "cart", "basket", "shop", "start", "start trial", "start free trial", "join", "join now", "get started", "continue", "place order", "order now", "complete order", "upgrade", "donate", "book now", "proceed", "submit payment"]
                 buttons = driver.find_elements(By.TAG_NAME, "button") + driver.find_elements(By.TAG_NAME, "a")
                 for btn in buttons:
-                    text = btn.text.strip().lower()
-                    if any(kw in text for kw in clickable_keywords):
-                        btn.click()
-                        time.sleep(3)
-            except Exception as click_err:
-                logger.info(f"[Click] No interactive buttons clicked: {click_err}")
+                    try:
+                        text = btn.text.strip().lower()
+                        if any(kw in text for kw in clickable_keywords):
+                            driver.execute_script("arguments[0].scrollIntoView(true);", btn)
+                            time.sleep(0.5)  # small wait to stabilize DOM
+                            btn.click()
+                            time.sleep(3)
+                    except Exception as e:
+                        logger.info(f"[Click Retry Skipped] Button became stale or failed: {e}")
+            except Exception as outer_click_err:
+                logger.info(f"[Click Block Error] Skipped click pass entirely: {outer_click_err}")
 
             for req in driver.requests:
                 if not req.response:
